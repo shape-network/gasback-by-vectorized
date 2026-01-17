@@ -10,7 +10,7 @@ contract Gasback {
     /*-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»*/
 
     /// @dev The address authorized to configure the contract.
-    address internal constant _SYSTEM_ADDRESS = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
+    address internal constant _SYSTEM_ADDRESS = 0x761ba9f637aE875222f5042A1dC2Ab2Bef77C9DB;
 
     /// @dev The denominator of the gasback ratio.
     uint256 public constant GASBACK_RATIO_DENOMINATOR = 1 ether;
