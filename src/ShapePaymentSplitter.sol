@@ -63,6 +63,9 @@ contract ShapePaymentSplitter {
      * functions].
      */
     receive() external payable {
+        for (uint256 i = 0; i < _payees.length; i++) {
+            release(payable(_payees[i]));
+        }
         emit PaymentReceived(msg.sender, msg.value);
     }
 
