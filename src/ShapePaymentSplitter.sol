@@ -44,9 +44,7 @@ contract ShapePaymentSplitter {
      * duplicates in `payees`.
      */
     constructor(address[] memory payees_, uint256[] memory shares_) payable {
-        if (payees_.length != shares_.length) {
-            revert PayeesAndSharesLengthMismatch();
-        }
+        if (payees_.length != shares_.length) revert PayeesAndSharesLengthMismatch();
         if (payees_.length == 0) revert NoPayees();
 
         for (uint256 i = 0; i < payees_.length; i++) {

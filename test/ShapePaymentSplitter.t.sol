@@ -261,4 +261,15 @@ contract ShapePaymentSplitterTest is SoladyTest {
         vm.expectRevert(ShapePaymentSplitter.AccountIsNotDuePayment.selector);
         splitter.release(payable(payee1));
     }
+
+    function test_revert_release_insufficient_balance() public {
+        // Manipulate storage to create an impossible state where totalReleased > 0 but balance = 0
+        // _totalReleased is at storage slot 1
+        vm.store(address(splitter), bytes32(uint256(1)), bytes32(uint256(100 ether)));
+
+        // Now releasable(payee1) = (0 + 100 ether) * 48 / 100 - 0 = 48 ether
+        // But balance is 0, so _sendValue will revert
+        vm.expectRevert(ShapePaymentSplitter.InsufficientBalance.selector);
+        splitter.release(payable(payee1));
+    }
 }
