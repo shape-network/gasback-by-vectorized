@@ -169,4 +169,83 @@ contract ShapePaymentSplitterTest is SoladyTest {
 
         assertLe(address(state.fuzzSplitter).balance, uint256(numPayees) * 9);
     }
+
+    /// @dev deployment revert tests
+
+    function test_revert_deploy_empty_payees() public {
+        address[] memory emptyPayees = new address[](0);
+        uint256[] memory emptyShares = new uint256[](0);
+
+        vm.expectRevert(ShapePaymentSplitter.NoPayees.selector);
+        new ShapePaymentSplitter(emptyPayees, emptyShares);
+    }
+
+    function test_revert_deploy_length_mismatch_more_payees() public {
+        address[] memory morePayees = new address[](3);
+        morePayees[0] = payee1;
+        morePayees[1] = payee2;
+        morePayees[2] = payee3;
+
+        uint256[] memory fewerShares = new uint256[](2);
+        fewerShares[0] = 50;
+        fewerShares[1] = 50;
+
+        vm.expectRevert(ShapePaymentSplitter.PayeesAndSharesLengthMismatch.selector);
+        new ShapePaymentSplitter(morePayees, fewerShares);
+    }
+
+    function test_revert_deploy_length_mismatch_more_shares() public {
+        address[] memory fewerPayees = new address[](2);
+        fewerPayees[0] = payee1;
+        fewerPayees[1] = payee2;
+
+        uint256[] memory moreShares = new uint256[](3);
+        moreShares[0] = 40;
+        moreShares[1] = 40;
+        moreShares[2] = 20;
+
+        vm.expectRevert(ShapePaymentSplitter.PayeesAndSharesLengthMismatch.selector);
+        new ShapePaymentSplitter(fewerPayees, moreShares);
+    }
+
+    function test_revert_deploy_zero_address_payee() public {
+        address[] memory badPayees = new address[](2);
+        badPayees[0] = payee1;
+        badPayees[1] = address(0);
+
+        uint256[] memory validShares = new uint256[](2);
+        validShares[0] = 50;
+        validShares[1] = 50;
+
+        vm.expectRevert(ShapePaymentSplitter.AccountIsTheZeroAddress.selector);
+        new ShapePaymentSplitter(badPayees, validShares);
+    }
+
+    function test_revert_deploy_zero_shares() public {
+        address[] memory validPayees = new address[](2);
+        validPayees[0] = payee1;
+        validPayees[1] = payee2;
+
+        uint256[] memory badShares = new uint256[](2);
+        badShares[0] = 100;
+        badShares[1] = 0;
+
+        vm.expectRevert(ShapePaymentSplitter.SharesAreZero.selector);
+        new ShapePaymentSplitter(validPayees, badShares);
+    }
+
+    function test_revert_deploy_duplicate_payee() public {
+        address[] memory duplicatePayees = new address[](3);
+        duplicatePayees[0] = payee1;
+        duplicatePayees[1] = payee2;
+        duplicatePayees[2] = payee1; // duplicate
+
+        uint256[] memory validShares = new uint256[](3);
+        validShares[0] = 40;
+        validShares[1] = 40;
+        validShares[2] = 20;
+
+        vm.expectRevert(ShapePaymentSplitter.AccountAlreadyHasShares.selector);
+        new ShapePaymentSplitter(duplicatePayees, validShares);
+    }
 }
