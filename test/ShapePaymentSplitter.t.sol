@@ -248,4 +248,17 @@ contract ShapePaymentSplitterTest is SoladyTest {
         vm.expectRevert(ShapePaymentSplitter.AccountAlreadyHasShares.selector);
         new ShapePaymentSplitter(duplicatePayees, validShares);
     }
+
+    function test_revert_release_account_has_no_shares() public {
+        address nonPayee = vm.addr(999);
+
+        vm.expectRevert(ShapePaymentSplitter.AccountHasNoShares.selector);
+        splitter.release(payable(nonPayee));
+    }
+
+    function test_revert_release_account_not_due_payment() public {
+        // No ETH sent to splitter, so payee1 has 0 releasable
+        vm.expectRevert(ShapePaymentSplitter.AccountIsNotDuePayment.selector);
+        splitter.release(payable(payee1));
+    }
 }
