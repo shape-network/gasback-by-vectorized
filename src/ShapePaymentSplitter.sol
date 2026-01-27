@@ -44,8 +44,9 @@ contract ShapePaymentSplitter {
      * duplicates in `payees`.
      */
     constructor(address[] memory payees_, uint256[] memory shares_) payable {
-        if (payees_.length != shares_.length)
+        if (payees_.length != shares_.length) {
             revert PayeesAndSharesLengthMismatch();
+        }
         if (payees_.length == 0) revert NoPayees();
 
         for (uint256 i = 0; i < payees_.length; i++) {
@@ -146,13 +147,12 @@ contract ShapePaymentSplitter {
      * @dev internal logic for computing the pending payment of an `account` given the token historical balances and
      * already released amounts.
      */
-    function _pendingPayment(
-        address account,
-        uint256 totalReceived,
-        uint256 alreadyReleased
-    ) private view returns (uint256) {
-        return
-            (totalReceived * _shares[account]) / _totalShares - alreadyReleased;
+    function _pendingPayment(address account, uint256 totalReceived, uint256 alreadyReleased)
+        private
+        view
+        returns (uint256)
+    {
+        return (totalReceived * _shares[account]) / _totalShares - alreadyReleased;
     }
 
     /**
@@ -192,7 +192,7 @@ contract ShapePaymentSplitter {
             revert InsufficientBalance();
         }
 
-        (bool success, ) = recipient.call{value: amount}("");
+        (bool success,) = recipient.call{value: amount}("");
         if (!success) {
             revert FailedToSendValue();
         }

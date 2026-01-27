@@ -38,8 +38,8 @@ contract ShapePaymentSplitterTest is SoladyTest {
         splitter = new ShapePaymentSplitter(payees, shares);
     }
 
-    function test_Splitter() public {
-        assertEq(splitter.payeeCount(), 3);
+    function test_read_public_variables() public {
+        assertEq(splitter.payees().length, 3);
         assertEq(splitter.totalShares(), 100);
         assertEq(splitter.shares(payee1), shares1);
         assertEq(splitter.shares(payee2), shares2);
