@@ -10,8 +10,7 @@ pragma solidity 0.8.20;
  * Each account can claim an amount proportional to their percentage of total shares. The share distribution is set at
  * contract deployment and cannot be updated thereafter.
  *
- * ShapePaymentSplitter follows a _pull payment_ model. Payments are not automatically forwarded to accounts but are
- * kept in this contract. The actual transfer is triggered as a separate step by calling the {release} function.
+ * ShapePaymentSplitter follows a _push payment_ model. Payments are not automatically forwarded to accounts.
  *
  * The sender of Ether to this contract does not need to be aware of the split mechanism, as it is handled transparently.
  */
@@ -45,7 +44,8 @@ contract ShapePaymentSplitter {
      * duplicates in `payees`.
      */
     constructor(address[] memory payees_, uint256[] memory shares_) payable {
-        if (payees_.length != shares_.length) revert PayeesAndSharesLengthMismatch();
+        if (payees_.length != shares_.length)
+            revert PayeesAndSharesLengthMismatch();
         if (payees_.length == 0) revert NoPayees();
 
         for (uint256 i = 0; i < payees_.length; i++) {
@@ -146,12 +146,13 @@ contract ShapePaymentSplitter {
      * @dev internal logic for computing the pending payment of an `account` given the token historical balances and
      * already released amounts.
      */
-    function _pendingPayment(address account, uint256 totalReceived, uint256 alreadyReleased)
-        private
-        view
-        returns (uint256)
-    {
-        return (totalReceived * _shares[account]) / _totalShares - alreadyReleased;
+    function _pendingPayment(
+        address account,
+        uint256 totalReceived,
+        uint256 alreadyReleased
+    ) private view returns (uint256) {
+        return
+            (totalReceived * _shares[account]) / _totalShares - alreadyReleased;
     }
 
     /**
@@ -191,7 +192,7 @@ contract ShapePaymentSplitter {
             revert InsufficientBalance();
         }
 
-        (bool success,) = recipient.call{value: amount}("");
+        (bool success, ) = recipient.call{value: amount}("");
         if (!success) {
             revert FailedToSendValue();
         }
