@@ -7,6 +7,57 @@ import {ShapePaymentSplitter} from "../src/ShapePaymentSplitter.sol";
 contract ShapePaymentSplitterTest is SoladyTest {
     ShapePaymentSplitter public splitter;
 
+    /// @dev fuzz helpers
+
+    // Struct to reduce stack depth in fuzz tests
+    struct FuzzTestState {
+        address[] fuzzPayees;
+        uint256[] fuzzShares;
+        uint256[] initialBalances;
+        uint256 totalSharesSum;
+        uint256 cumulativeTotalPaid;
+        ShapePaymentSplitter fuzzSplitter;
+    }
+
+    function _createFuzzTestState(uint8 numPayees, uint256 addrOffset)
+        internal
+        returns (FuzzTestState memory state)
+    {
+        state.fuzzPayees = new address[](numPayees);
+        state.fuzzShares = new uint256[](numPayees);
+        state.initialBalances = new uint256[](numPayees);
+
+        for (uint256 i = 0; i < numPayees; i++) {
+            state.fuzzPayees[i] = vm.addr(i + addrOffset);
+            state.fuzzShares[i] = (i % 100) + 1;
+            state.totalSharesSum += state.fuzzShares[i];
+        }
+
+        state.fuzzSplitter = new ShapePaymentSplitter(state.fuzzPayees, state.fuzzShares);
+
+        for (uint256 i = 0; i < numPayees; i++) {
+            state.initialBalances[i] = state.fuzzPayees[i].balance;
+        }
+    }
+
+    function _sendPaymentAndUpdateState(FuzzTestState memory state, uint256 paymentAmount)
+        internal
+    {
+        state.cumulativeTotalPaid += paymentAmount;
+        vm.deal(address(this), paymentAmount);
+        (bool success,) = address(state.fuzzSplitter).call{value: paymentAmount}("");
+        assertTrue(success);
+    }
+
+    function _verifyPayeeBalances(FuzzTestState memory state, uint8 numPayees) internal view {
+        for (uint256 i = 0; i < numPayees; i++) {
+            uint256 actualReceived = state.fuzzPayees[i].balance - state.initialBalances[i];
+            uint256 expectedReceived =
+                (state.cumulativeTotalPaid * state.fuzzShares[i]) / state.totalSharesSum;
+            assertEq(actualReceived, expectedReceived);
+        }
+    }
+
     address[] public payees = new address[](3);
     uint256[] public shares = new uint256[](3);
 
@@ -74,9 +125,15 @@ contract ShapePaymentSplitterTest is SoladyTest {
         uint256 expectedPayment3 = (paymentAmount * shares3) / totalShares;
 
         // Verify balance changes match expected payments
-        assertEq(balanceAfter1 - balanceBefore1, expectedPayment1, "Payee1 received incorrect amount");
-        assertEq(balanceAfter2 - balanceBefore2, expectedPayment2, "Payee2 received incorrect amount");
-        assertEq(balanceAfter3 - balanceBefore3, expectedPayment3, "Payee3 received incorrect amount");
+        assertEq(
+            balanceAfter1 - balanceBefore1, expectedPayment1, "Payee1 received incorrect amount"
+        );
+        assertEq(
+            balanceAfter2 - balanceBefore2, expectedPayment2, "Payee2 received incorrect amount"
+        );
+        assertEq(
+            balanceAfter3 - balanceBefore3, expectedPayment3, "Payee3 received incorrect amount"
+        );
 
         // Verify the exact amounts (48%, 42%, 10% of 10 ether)
         assertEq(balanceAfter1 - balanceBefore1, 4.8 ether, "Payee1 should receive 4.8 ether");
@@ -85,51 +142,31 @@ contract ShapePaymentSplitterTest is SoladyTest {
     }
 
     function testFuzz_balances_after_payment(uint8 numPayees, uint256 paymentAmount) public {
-        // Bound inputs to reasonable ranges
         numPayees = uint8(bound(numPayees, 1, 50));
         paymentAmount = bound(paymentAmount, 1 ether, 1000 ether);
 
-        // Create dynamic arrays for payees and shares
-        address[] memory fuzzPayees = new address[](numPayees);
-        uint256[] memory fuzzShares = new uint256[](numPayees);
-        uint256[] memory balancesBefore = new uint256[](numPayees);
+        FuzzTestState memory state = _createFuzzTestState(numPayees, 100);
 
-        uint256 totalSharesSum = 0;
+        _sendPaymentAndUpdateState(state, paymentAmount);
+        _verifyPayeeBalances(state, numPayees);
 
-        // Generate payees and shares
-        for (uint256 i = 0; i < numPayees; i++) {
-            // Generate unique addresses using index + 100 to avoid collisions with existing test addresses
-            fuzzPayees[i] = vm.addr(i + 100);
-            // Assign shares between 1 and 100 based on index (deterministic for reproducibility)
-            fuzzShares[i] = (i % 100) + 1;
-            totalSharesSum += fuzzShares[i];
+        assertLe(address(state.fuzzSplitter).balance, uint256(numPayees));
+    }
+
+    function testFuzz_balances_after_multiple_payments(
+        uint8 numPayees,
+        uint256[9] memory paymentAmounts
+    ) public {
+        numPayees = uint8(bound(numPayees, 1, 50));
+
+        FuzzTestState memory state = _createFuzzTestState(numPayees, 200);
+
+        for (uint256 p = 0; p < 9; p++) {
+            uint256 paymentAmount = bound(paymentAmounts[p], 0.1 ether, 10 ether);
+            _sendPaymentAndUpdateState(state, paymentAmount);
+            _verifyPayeeBalances(state, numPayees);
         }
 
-        // Deploy new splitter with fuzzed payees and shares
-        ShapePaymentSplitter fuzzSplitter = new ShapePaymentSplitter(fuzzPayees, fuzzShares);
-
-        // Record balances before
-        for (uint256 i = 0; i < numPayees; i++) {
-            balancesBefore[i] = fuzzPayees[i].balance;
-        }
-
-        // Send ETH to the splitter
-        vm.deal(address(this), paymentAmount);
-        (bool success,) = address(fuzzSplitter).call{value: paymentAmount}("");
-        assertTrue(success, "Payment to splitter failed");
-
-        // Verify balance changes for each payee
-        for (uint256 i = 0; i < numPayees; i++) {
-            uint256 balanceAfter = fuzzPayees[i].balance;
-            uint256 expectedPayment = (paymentAmount * fuzzShares[i]) / totalSharesSum;
-            assertEq(
-                balanceAfter - balancesBefore[i],
-                expectedPayment,
-                string.concat("Payee ", vm.toString(i), " received incorrect amount")
-            );
-        }
-
-        // Verify splitter contract has no remaining balance (or only dust from rounding)
-        assertLe(address(fuzzSplitter).balance, numPayees, "Splitter should have minimal remaining balance");
+        assertLe(address(state.fuzzSplitter).balance, uint256(numPayees) * 9);
     }
 }
