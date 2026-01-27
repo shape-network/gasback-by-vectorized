@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.28;
 
 /**
  * @title ShapePaymentSplitter
@@ -10,8 +10,7 @@ pragma solidity 0.8.20;
  * Each account can claim an amount proportional to their percentage of total shares. The share distribution is set at
  * contract deployment and cannot be updated thereafter.
  *
- * ShapePaymentSplitter follows a _pull payment_ model. Payments are not automatically forwarded to accounts but are
- * kept in this contract. The actual transfer is triggered as a separate step by calling the {release} function.
+ * ShapePaymentSplitter follows a _push payment_ model. Payments are not automatically forwarded to accounts.
  *
  * The sender of Ether to this contract does not need to be aware of the split mechanism, as it is handled transparently.
  */
