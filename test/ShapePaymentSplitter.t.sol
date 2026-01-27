@@ -4,6 +4,12 @@ pragma solidity ^0.8.4;
 import "./utils/SoladyTest.sol";
 import {ShapePaymentSplitter} from "../src/ShapePaymentSplitter.sol";
 
+contract RejectingPayee {
+    receive() external payable {
+        revert("I reject ETH");
+    }
+}
+
 contract ShapePaymentSplitterTest is SoladyTest {
     ShapePaymentSplitter public splitter;
 
@@ -272,4 +278,25 @@ contract ShapePaymentSplitterTest is SoladyTest {
         vm.expectRevert(ShapePaymentSplitter.InsufficientBalance.selector);
         splitter.release(payable(payee1));
     }
+
+    function test_revert_release_failed_to_send_value() public {
+        // Create a contract that rejects ETH
+        RejectingPayee rejecter = new RejectingPayee();
+
+        address[] memory rejectorPayees = new address[](1);
+        rejectorPayees[0] = address(rejecter);
+
+        uint256[] memory rejectorShares = new uint256[](1);
+        rejectorShares[0] = 100;
+
+        ShapePaymentSplitter rejectorSplitter =
+            new ShapePaymentSplitter(rejectorPayees, rejectorShares);
+
+        // Send ETH to the splitter - it will try to release to the rejecting payee
+        vm.deal(address(this), 1 ether);
+        (bool success, bytes memory returnData) = address(rejectorSplitter).call{value: 1 ether}("");
+        assertEq(success, false);
+        assertEq(bytes4(returnData), ShapePaymentSplitter.FailedToSendValue.selector);
+    }
 }
+
