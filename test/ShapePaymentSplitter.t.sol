@@ -240,6 +240,43 @@ contract ShapePaymentSplitterTest is SoladyTest {
         assertEq(address(localSplitter).balance, 1 wei);
     }
 
+    function test_distribute_noop_start_gte_end() public {
+        uint256 paymentAmount = 1 ether;
+
+        uint256 balanceBefore1 = payee1.balance;
+        uint256 balanceBefore2 = payee2.balance;
+        uint256 balanceBefore3 = payee3.balance;
+
+        vm.deal(address(splitter), paymentAmount);
+        splitter.distribute(2, 2);
+
+        assertEq(payee1.balance, balanceBefore1);
+        assertEq(payee2.balance, balanceBefore2);
+        assertEq(payee3.balance, balanceBefore3);
+        assertEq(address(splitter).balance, paymentAmount);
+    }
+
+    function test_distribute_clamps_end_to_payees_length() public {
+        uint256 paymentAmount = 1 ether;
+
+        uint256 balanceBefore1 = payee1.balance;
+        uint256 balanceBefore2 = payee2.balance;
+        uint256 balanceBefore3 = payee3.balance;
+
+        vm.deal(address(splitter), paymentAmount);
+        splitter.distribute(0, 10);
+
+        uint256 totalShares = splitter.totalShares();
+        uint256 expectedPayment1 = (paymentAmount * shares1) / totalShares;
+        uint256 expectedPayment2 = (paymentAmount * shares2) / totalShares;
+        uint256 expectedPayment3 = (paymentAmount * shares3) / totalShares;
+
+        assertEq(payee1.balance - balanceBefore1, expectedPayment1);
+        assertEq(payee2.balance - balanceBefore2, expectedPayment2);
+        assertEq(payee3.balance - balanceBefore3, expectedPayment3);
+        assertEq(address(splitter).balance, 0);
+    }
+
     function testFuzz_balances_after_payment(uint8 numPayees, uint256 paymentAmount) public {
         numPayees = uint8(bound(numPayees, 1, 50));
         paymentAmount = bound(paymentAmount, 1 ether, 1000 ether);
