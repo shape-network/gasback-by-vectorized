@@ -277,6 +277,34 @@ contract ShapePaymentSplitterTest is SoladyTest {
         assertEq(address(splitter).balance, 0);
     }
 
+    function test_distribute_invariants_with_failed_payee() public {
+        RejectingPayee rejecter = new RejectingPayee();
+
+        address[] memory localPayees = new address[](2);
+        localPayees[0] = address(rejecter);
+        localPayees[1] = payee1;
+
+        uint256[] memory localShares = new uint256[](2);
+        localShares[0] = 50;
+        localShares[1] = 50;
+
+        ShapePaymentSplitter localSplitter = new ShapePaymentSplitter(localPayees, localShares);
+
+        uint256 paymentAmount = 1 ether;
+        uint256 payee1Before = payee1.balance;
+
+        vm.deal(address(localSplitter), paymentAmount);
+        localSplitter.distribute(0, 2);
+
+        assertEq(payee1.balance - payee1Before, 0.5 ether);
+        assertEq(localSplitter.released(payee1), 0.5 ether);
+        assertEq(localSplitter.released(address(rejecter)), 0);
+        assertEq(localSplitter.totalReleased(), 0.5 ether);
+        assertEq(address(localSplitter).balance, 0.5 ether);
+        assertEq(localSplitter.releasable(address(rejecter)), 0.5 ether);
+        assertEq(localSplitter.releasable(payee1), 0);
+    }
+
     function testFuzz_balances_after_payment(uint8 numPayees, uint256 paymentAmount) public {
         numPayees = uint8(bound(numPayees, 1, 50));
         paymentAmount = bound(paymentAmount, 1 ether, 1000 ether);
