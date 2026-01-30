@@ -160,6 +160,10 @@ contract ShapePaymentSplitter {
         return (totalReceived * _shares[account]) / _totalShares - alreadyReleased;
     }
 
+    /**
+     * @dev Attempt to pay a slice of payees without reverting the whole call.
+     * Skips zero-due accounts and emits failures for accounts that revert on receive.
+     */
     function _distribute(uint256 start, uint256 end) private {
         uint256 payeesLength = _payees.length;
         if (end > payeesLength) {
@@ -176,7 +180,8 @@ contract ShapePaymentSplitter {
                 continue;
             }
 
-            try this.release(account) {} catch (bytes memory reason) {
+            try this.release(account) {}
+            catch (bytes memory reason) {
                 emit PaymentFailed(account, payment, reason);
             }
         }
