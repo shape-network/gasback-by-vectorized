@@ -10,7 +10,26 @@ contract RejectingPayee {
     }
 }
 
+contract ReentrantPayee {
+    ShapePaymentSplitter public splitter;
+    bool public didReenter;
+
+    function setSplitter(ShapePaymentSplitter splitter_) external {
+        splitter = splitter_;
+    }
+
+    receive() external payable {
+        if (!didReenter) {
+            didReenter = true;
+            (bool success,) = address(splitter).call{value: 1}("");
+            require(success, "reenter failed");
+        }
+    }
+}
+
 contract ShapePaymentSplitterTest is SoladyTest {
+    event PaymentFailed(address to, uint256 amount, bytes reason);
+
     ShapePaymentSplitter public splitter;
 
     /// @dev fuzz helpers
@@ -145,6 +164,80 @@ contract ShapePaymentSplitterTest is SoladyTest {
         assertEq(balanceAfter1 - balanceBefore1, 4.8 ether, "Payee1 should receive 4.8 ether");
         assertEq(balanceAfter2 - balanceBefore2, 4.2 ether, "Payee2 should receive 4.2 ether");
         assertEq(balanceAfter3 - balanceBefore3, 1 ether, "Payee3 should receive 1 ether");
+    }
+
+    function test_receive_allows_small_payment() public {
+        uint256 paymentAmount = 1 wei;
+
+        uint256 balanceBefore1 = payee1.balance;
+        uint256 balanceBefore2 = payee2.balance;
+        uint256 balanceBefore3 = payee3.balance;
+
+        vm.deal(address(this), paymentAmount);
+        (bool success,) = address(splitter).call{value: paymentAmount}("");
+        assertTrue(success, "Payment to splitter failed");
+
+        assertEq(payee1.balance, balanceBefore1);
+        assertEq(payee2.balance, balanceBefore2);
+        assertEq(payee3.balance, balanceBefore3);
+        assertEq(address(splitter).balance, paymentAmount);
+    }
+
+    function test_receive_skips_failed_payee_emits_failure() public {
+        RejectingPayee rejecter = new RejectingPayee();
+
+        address[] memory localPayees = new address[](2);
+        localPayees[0] = address(rejecter);
+        localPayees[1] = payee1;
+
+        uint256[] memory localShares = new uint256[](2);
+        localShares[0] = 50;
+        localShares[1] = 50;
+
+        ShapePaymentSplitter localSplitter = new ShapePaymentSplitter(localPayees, localShares);
+
+        uint256 paymentAmount = 1 ether;
+        uint256 payee1Before = payee1.balance;
+
+        vm.deal(address(this), paymentAmount);
+        vm.expectEmit(true, true, true, true);
+        emit PaymentFailed(
+            address(rejecter),
+            0.5 ether,
+            abi.encodeWithSelector(ShapePaymentSplitter.FailedToSendValue.selector)
+        );
+
+        (bool success,) = address(localSplitter).call{value: paymentAmount}("");
+        assertTrue(success, "Payment to splitter failed");
+
+        assertEq(payee1.balance - payee1Before, 0.5 ether);
+        assertEq(address(localSplitter).balance, 0.5 ether);
+    }
+
+    function test_receive_allows_reentrant_payee() public {
+        ReentrantPayee reentrant = new ReentrantPayee();
+
+        address[] memory localPayees = new address[](2);
+        localPayees[0] = address(reentrant);
+        localPayees[1] = payee1;
+
+        uint256[] memory localShares = new uint256[](2);
+        localShares[0] = 1;
+        localShares[1] = 1;
+
+        ShapePaymentSplitter localSplitter = new ShapePaymentSplitter(localPayees, localShares);
+        reentrant.setSplitter(localSplitter);
+
+        uint256 paymentAmount = 1 ether;
+        uint256 payee1Before = payee1.balance;
+
+        vm.deal(address(this), paymentAmount);
+        (bool success,) = address(localSplitter).call{value: paymentAmount}("");
+        assertTrue(success, "Payment to splitter failed");
+
+        assertTrue(reentrant.didReenter());
+        assertEq(payee1.balance - payee1Before, 0.5 ether);
+        assertEq(address(localSplitter).balance, 1 wei);
     }
 
     function testFuzz_balances_after_payment(uint8 numPayees, uint256 paymentAmount) public {
@@ -292,11 +385,13 @@ contract ShapePaymentSplitterTest is SoladyTest {
         ShapePaymentSplitter rejectorSplitter =
             new ShapePaymentSplitter(rejectorPayees, rejectorShares);
 
-        // Send ETH to the splitter - it will try to release to the rejecting payee
+        // Send ETH to the splitter - it should emit a failure but not revert
         vm.deal(address(this), 1 ether);
-        (bool success, bytes memory returnData) = address(rejectorSplitter).call{value: 1 ether}("");
-        assertEq(success, false);
-        assertEq(bytes4(returnData), ShapePaymentSplitter.FailedToSendValue.selector);
+        (bool success,) = address(rejectorSplitter).call{value: 1 ether}("");
+        assertTrue(success);
+
+        // Direct release should still revert since the payee rejects ETH
+        vm.expectRevert(ShapePaymentSplitter.FailedToSendValue.selector);
+        rejectorSplitter.release(payable(address(rejecter)));
     }
 }
-

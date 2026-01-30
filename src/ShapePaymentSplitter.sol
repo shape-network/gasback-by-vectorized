@@ -10,7 +10,7 @@ pragma solidity 0.8.28;
  * Each account can claim an amount proportional to their percentage of total shares. The share distribution is set at
  * contract deployment and cannot be updated thereafter.
  *
- * ShapePaymentSplitter follows a _push payment_ model. Payments are not automatically forwarded to accounts.
+ * ShapePaymentSplitter follows a _push payment_ model. Incoming Ether triggers an attempt to release funds to all payees.
  *
  * The sender of Ether to this contract does not need to be aware of the split mechanism, as it is handled transparently.
  */
@@ -18,6 +18,7 @@ contract ShapePaymentSplitter {
     event PayeeAdded(address account, uint256 shares);
     event PaymentReleased(address to, uint256 amount);
     event PaymentReceived(address from, uint256 amount);
+    event PaymentFailed(address to, uint256 amount, bytes reason);
 
     error FailedToSendValue();
     error PayeesAndSharesLengthMismatch();
@@ -62,9 +63,7 @@ contract ShapePaymentSplitter {
      * functions].
      */
     receive() external payable {
-        for (uint256 i = 0; i < _payees.length; i++) {
-            release(payable(_payees[i]));
-        }
+        _distribute(0, _payees.length);
         emit PaymentReceived(msg.sender, msg.value);
     }
 
@@ -119,6 +118,14 @@ contract ShapePaymentSplitter {
     }
 
     /**
+     * @dev Attempts to release payments for a slice of payees, skipping zero-due payees and emitting failures instead of
+     * reverting on send failures.
+     */
+    function distribute(uint256 start, uint256 end) public {
+        _distribute(start, end);
+    }
+
+    /**
      * @dev Triggers a transfer to `account` of the amount of Ether they are owed, according to their percentage of the
      * total shares and their previous withdrawals.
      */
@@ -151,6 +158,33 @@ contract ShapePaymentSplitter {
         returns (uint256)
     {
         return (totalReceived * _shares[account]) / _totalShares - alreadyReleased;
+    }
+
+    /**
+     * @dev Attempt to pay a slice of payees without reverting the whole call.
+     * Skips zero-due accounts and emits failures for accounts that revert on receive.
+     */
+    function _distribute(uint256 start, uint256 end) private {
+        uint256 payeesLength = _payees.length;
+        if (end > payeesLength) {
+            end = payeesLength;
+        }
+        if (start >= end) {
+            return;
+        }
+
+        for (uint256 i = start; i < end; i++) {
+            address payable account = payable(_payees[i]);
+            uint256 payment = releasable(account);
+            if (payment == 0) {
+                continue;
+            }
+
+            try this.release(account) {}
+            catch (bytes memory reason) {
+                emit PaymentFailed(account, payment, reason);
+            }
+        }
     }
 
     /**
