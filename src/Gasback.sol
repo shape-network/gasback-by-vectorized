@@ -193,6 +193,9 @@ contract Gasback {
 
         uint256 ethFromGas = gasToBurn * block.basefee;
         uint256 ethToGive = (ethFromGas * $.gasbackRatioNumerator) / GASBACK_RATIO_DENOMINATOR;
+        unchecked {
+            $.accrued += ethFromGas - ethToGive;
+        }
 
         uint256 selfBalance = address(this).balance;
         // If the contract has insufficient ETH, try to pull from the base fee vault.
@@ -218,10 +221,6 @@ contract Gasback {
             // Do a pass through.
             ethToGive = 0;
             gasToBurn = 0;
-        }
-
-        unchecked {
-            $.accrued += ethFromGas - ethToGive;
         }
 
         /// @solidity memory-safe-assembly
