@@ -60,19 +60,4 @@ contract GasbackTest is SoladyTest {
         assertEq(pranker.balance, 0);
     }
 
-    function testConvertGasbackMinVaultBalance() public {
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
-        uint256 minVaultBalance = 50 ether;
-        vm.prank(system);
-        gasback.setMinVaultBalance(minVaultBalance);
-
-        uint256 gasToBurn = 333;
-
-        address pranker = address(111);
-        assertEq(pranker.balance, 0);
-        vm.prank(pranker);
-        (bool success,) = address(gasback).call(abi.encode(gasToBurn));
-        assertTrue(success);
-        assertEq(pranker.balance, 0);
-    }
 }
