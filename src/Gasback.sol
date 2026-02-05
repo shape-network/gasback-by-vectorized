@@ -34,6 +34,8 @@ contract Gasback {
         uint256 accrued;
         // A mapping of addresses authorized to withdraw the accrued ETH.
         mapping(address => bool) accuralWithdrawers;
+        // The numerator for the share of the base fee vault.
+        uint256 baseFeeVaultShareNumerator;
     }
 
     /// @dev Returns a pointer to the storage struct.
@@ -55,6 +57,7 @@ contract Gasback {
         $.gasbackRatioNumerator = 0.8 ether;
         $.gasbackMaxBaseFee = type(uint256).max;
         $.baseFeeVault = 0x4200000000000000000000000000000000000019;
+        $.baseFeeVaultShareNumerator = 600000000000000000;
     }
 
     /*«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-*/
@@ -144,6 +147,13 @@ contract Gasback {
         return true;
     }
 
+    /// @dev Sets the numerator for the share of the base fee vault.
+    function setBaseFeeVaultShareNumerator(uint256 value) public onlySystemOrThis returns (bool) {
+        require(value <= GASBACK_RATIO_DENOMINATOR);
+        _getGasbackStorage().baseFeeVaultShareNumerator = value;
+        return true;
+    }
+
     /// @dev A noop function.
     function noop() public payable returns (bool) {
         return true;
@@ -182,11 +192,15 @@ contract Gasback {
 
         uint256 selfBalance = address(this).balance;
         // If the contract has insufficient ETH, try to pull from the base fee vault.
-        if (ethToGive > selfBalance) {
+        if (ethToGive > selfBalance && block.basefee <= $.gasbackMaxBaseFee) {
             address vault = $.baseFeeVault;
+            uint256 shortfall = ethToGive - selfBalance;
+            uint256 vaultBalance = vault.balance;
+            uint256 expectedShare =
+                (vaultBalance * $.baseFeeVaultShareNumerator) / GASBACK_RATIO_DENOMINATOR;
             /// @solidity memory-safe-assembly
             assembly {
-                if extcodesize(vault) {
+                if and(extcodesize(vault), iszero(lt(expectedShare, shortfall))) {
                     mstore(0x00, 0x3ccfd60b) // `withdraw()`.
                     pop(call(gas(), vault, 0, 0x1c, 0x04, 0x00, 0x00))
                 }
