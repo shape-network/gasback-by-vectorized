@@ -318,6 +318,27 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(vault.balance, 0);
     }
 
+    function test_fallbackPullsFromVaultWhenExpectedShareEqualsShortfall() public {
+        address vault = address(0xA005);
+        vm.etch(vault, hex"33ff00");
+        _configureBaseFeeVault(vault, DENOMINATOR);
+
+        uint256 baseFee = 10;
+        uint256 gasToBurn = 100;
+        uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethToGive = (ethFromGas * 0.8 ether) / DENOMINATOR;
+
+        vm.deal(vault, ethToGive);
+        vm.fee(baseFee);
+
+        (bool success, uint256 returnedEthToGive) = _callFallback(address(0xB0B), gasToBurn);
+
+        assertTrue(success);
+        assertEq(returnedEthToGive, ethToGive);
+        assertEq(address(0xB0B).balance, ethToGive);
+        assertEq(vault.balance, 0);
+    }
+
     function test_fallbackDoesNotPullFromVaultWhenExpectedShareBelowShortfall() public {
         address vault = address(0xA002);
         vm.etch(vault, hex"60016000550000");
@@ -537,5 +558,12 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(returnedEthToGive, 0);
         assertEq(address(0xB0B).balance, 0);
         assertEq(gasback.accrued(), ethFromGas);
+    }
+
+    function testRevertSetBaseFeeVaultShareNumeratorAboveDenominator() public {
+        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
+        vm.prank(system);
+        vm.expectRevert();
+        gasback.setBaseFeeVaultShareNumerator(1 ether + 1);
     }
 }
