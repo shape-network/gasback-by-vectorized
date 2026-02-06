@@ -511,6 +511,32 @@ contract GasbackExtendedTest is SoladyTest {
         gasback.withdrawAccrued(address(this), 1);
     }
 
+    function test_withdrawAccruedRequireBranchTrue_authorized() public {
+        uint256 accruedAmount = _accrueViaPassThrough(10, 100);
+        vm.deal(address(gasback), accruedAmount);
+
+        vm.prank(SYSTEM_ADDRESS);
+        gasback.setAccuralWithdrawer(address(this), true);
+
+        address recipient = address(0xD00D);
+        uint256 beforeBalance = recipient.balance;
+        bool success = gasback.withdrawAccrued(recipient, 1);
+
+        assertTrue(success);
+        assertEq(recipient.balance, beforeBalance + 1);
+        assertEq(gasback.accrued(), accruedAmount - 1);
+    }
+
+    function test_withdrawAccruedRequireBranchFalse_unauthorizedReverts() public {
+        uint256 accruedAmount = _accrueViaPassThrough(10, 100);
+        vm.deal(address(gasback), accruedAmount);
+
+        vm.expectRevert();
+        gasback.withdrawAccrued(address(0xD00D), 1);
+
+        assertEq(gasback.accrued(), accruedAmount);
+    }
+
     function test_setAccuralWithdrawerRevokeBlocksWithdrawAccrued() public {
         _accrueViaPassThrough(10, 100);
 
