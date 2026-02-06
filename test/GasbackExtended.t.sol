@@ -22,6 +22,16 @@ contract RejectingCaller {
     }
 }
 
+contract AcceptingCaller {
+    function trigger(address target, uint256 gasToBurn) external returns (uint256 ethToGive) {
+        (bool success, bytes memory data) = target.call(abi.encode(gasToBurn));
+        require(success);
+        ethToGive = abi.decode(data, (uint256));
+    }
+
+    receive() external payable {}
+}
+
 contract GasbackExtendedTest is SoladyTest {
     address internal constant SYSTEM_ADDRESS = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
     address internal constant DEFAULT_BASE_FEE_VAULT = 0x4200000000000000000000000000000000000019;
@@ -207,6 +217,22 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(gasback.accrued(), ethFromGas);
     }
 
+    function test_fallbackZeroGasToBurnNoops() public {
+        vm.deal(address(gasback), 1 ether);
+        vm.fee(123);
+
+        uint256 beforeBalance = address(gasback).balance;
+        uint256 beforeAccrued = gasback.accrued();
+
+        (bool success, uint256 returnedEthToGive) = _callFallback(address(0xB0B), 0);
+
+        assertTrue(success);
+        assertEq(returnedEthToGive, 0);
+        assertEq(address(0xB0B).balance, 0);
+        assertEq(address(gasback).balance, beforeBalance);
+        assertEq(gasback.accrued(), beforeAccrued);
+    }
+
     function test_fallbackPassThroughWhenInsufficientBalance() public {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
@@ -302,6 +328,27 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(vault.balance, 0);
     }
 
+    function test_fallbackPullsFromVaultWhenExpectedShareEqualsShortfall() public {
+        address vault = address(0xA005);
+        vm.etch(vault, hex"33ff00");
+        _configureBaseFeeVault(vault, DENOMINATOR);
+
+        uint256 baseFee = 10;
+        uint256 gasToBurn = 100;
+        uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethToGive = (ethFromGas * 0.8 ether) / DENOMINATOR;
+
+        vm.deal(vault, ethToGive);
+        vm.fee(baseFee);
+
+        (bool success, uint256 returnedEthToGive) = _callFallback(address(0xB0B), gasToBurn);
+
+        assertTrue(success);
+        assertEq(returnedEthToGive, ethToGive);
+        assertEq(address(0xB0B).balance, ethToGive);
+        assertEq(vault.balance, 0);
+    }
+
     function test_fallbackDoesNotPullFromVaultWhenExpectedShareBelowShortfall() public {
         address vault = address(0xA002);
         vm.etch(vault, hex"60016000550000");
@@ -389,6 +436,42 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(gasback.accrued(), ethFromGas - ethToGive);
     }
 
+    function test_fallbackPaysAcceptingContractCaller() public {
+        AcceptingCaller caller = new AcceptingCaller();
+
+        uint256 baseFee = 10;
+        uint256 gasToBurn = 100;
+        uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethToGive = (ethFromGas * 0.8 ether) / DENOMINATOR;
+
+        vm.deal(address(gasback), ethToGive);
+        vm.fee(baseFee);
+
+        uint256 returnedEthToGive = caller.trigger(address(gasback), gasToBurn);
+
+        assertEq(returnedEthToGive, ethToGive);
+        assertEq(address(caller).balance, ethToGive);
+        assertEq(gasback.accrued(), ethFromGas - ethToGive);
+        assertEq(address(gasback).balance, 0);
+    }
+
+    function test_fallbackSkipsEthSendWhenCallerRejectsAndEthToGiveIsZero() public {
+        RejectingCaller caller = new RejectingCaller();
+        vm.prank(SYSTEM_ADDRESS);
+        gasback.setGasbackRatioNumerator(0);
+
+        uint256 baseFee = 10;
+        uint256 gasToBurn = 100;
+        uint256 ethFromGas = baseFee * gasToBurn;
+
+        vm.fee(baseFee);
+        uint256 returnedEthToGive = caller.trigger(address(gasback), gasToBurn);
+
+        assertEq(returnedEthToGive, 0);
+        assertEq(address(caller).balance, 0);
+        assertEq(gasback.accrued(), ethFromGas);
+    }
+
     function test_revert_withdrawWhenRecipientRejectsEth() public {
         RejectingReceiver rejector = new RejectingReceiver();
         vm.deal(address(gasback), 1 ether);
@@ -424,6 +507,46 @@ contract GasbackExtendedTest is SoladyTest {
 
     function test_revert_withdrawAccruedUnauthorized() public {
         _accrueViaPassThrough(10, 100);
+        vm.expectRevert();
+        gasback.withdrawAccrued(address(this), 1);
+    }
+
+    function test_withdrawAccruedRequireBranchTrue_authorized() public {
+        uint256 accruedAmount = _accrueViaPassThrough(10, 100);
+        vm.deal(address(gasback), accruedAmount);
+
+        vm.prank(SYSTEM_ADDRESS);
+        gasback.setAccuralWithdrawer(address(this), true);
+
+        address recipient = address(0xD00D);
+        uint256 beforeBalance = recipient.balance;
+        bool success = gasback.withdrawAccrued(recipient, 1);
+
+        assertTrue(success);
+        assertEq(recipient.balance, beforeBalance + 1);
+        assertEq(gasback.accrued(), accruedAmount - 1);
+    }
+
+    function test_withdrawAccruedRequireBranchFalse_unauthorizedReverts() public {
+        uint256 accruedAmount = _accrueViaPassThrough(10, 100);
+        vm.deal(address(gasback), accruedAmount);
+
+        vm.expectRevert();
+        gasback.withdrawAccrued(address(0xD00D), 1);
+
+        assertEq(gasback.accrued(), accruedAmount);
+    }
+
+    function test_setAccuralWithdrawerRevokeBlocksWithdrawAccrued() public {
+        _accrueViaPassThrough(10, 100);
+
+        vm.startPrank(SYSTEM_ADDRESS);
+        gasback.setAccuralWithdrawer(address(this), true);
+        gasback.setAccuralWithdrawer(address(this), false);
+        vm.stopPrank();
+
+        assertFalse(gasback.isAuthorizedAccuralWithdrawer(address(this)));
+
         vm.expectRevert();
         gasback.withdrawAccrued(address(this), 1);
     }
@@ -507,5 +630,12 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(returnedEthToGive, 0);
         assertEq(address(0xB0B).balance, 0);
         assertEq(gasback.accrued(), ethFromGas);
+    }
+
+    function testRevertSetBaseFeeVaultShareNumeratorAboveDenominator() public {
+        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
+        vm.prank(system);
+        vm.expectRevert();
+        gasback.setBaseFeeVaultShareNumerator(1 ether + 1);
     }
 }
