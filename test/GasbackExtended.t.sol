@@ -74,9 +74,10 @@ contract GasbackExtendedTest is SoladyTest {
     }
 
     function test_constructorDefaults() public {
-        assertEq(gasback.gasbackRatioNumerator(), 0.8 ether);
+        assertEq(gasback.gasbackRatioNumerator(), 0.6 ether);
         assertEq(gasback.gasbackMaxBaseFee(), type(uint256).max);
         assertEq(gasback.baseFeeVault(), DEFAULT_BASE_FEE_VAULT);
+        assertEq(gasback.baseFeeVaultShareNumerator(), 0.6 ether);
         assertEq(gasback.accrued(), 0);
         assertEq(gasback.GASBACK_RATIO_DENOMINATOR(), DENOMINATOR);
         assertFalse(gasback.isAuthorizedAccuralWithdrawer(address(this)));
@@ -118,15 +119,16 @@ contract GasbackExtendedTest is SoladyTest {
         vm.deal(address(gasback), 1 ether);
 
         vm.startPrank(SYSTEM_ADDRESS);
+        assertTrue(gasback.setBaseFeeVaultShareNumerator(0.9 ether));
         assertTrue(gasback.setGasbackRatioNumerator(0.9 ether));
         assertTrue(gasback.setGasbackMaxBaseFee(123));
         assertTrue(gasback.setBaseFeeVault(address(0x1234)));
-        assertTrue(gasback.setBaseFeeVaultShareNumerator(0.7 ether));
         assertTrue(gasback.setAccuralWithdrawer(address(0x99), true));
         assertTrue(gasback.withdraw(address(0xA11CE), 0.2 ether));
         vm.stopPrank();
 
         assertEq(gasback.gasbackRatioNumerator(), 0.9 ether);
+        assertEq(gasback.baseFeeVaultShareNumerator(), 0.9 ether);
         assertEq(gasback.gasbackMaxBaseFee(), 123);
         assertEq(gasback.baseFeeVault(), address(0x1234));
         assertTrue(gasback.isAuthorizedAccuralWithdrawer(address(0x99)));
@@ -137,19 +139,20 @@ contract GasbackExtendedTest is SoladyTest {
         vm.deal(address(gasback), 1 ether);
 
         vm.prank(address(gasback));
+        assertTrue(gasback.setBaseFeeVaultShareNumerator(1 ether));
+        vm.prank(address(gasback));
         assertTrue(gasback.setGasbackRatioNumerator(1 ether));
         vm.prank(address(gasback));
         assertTrue(gasback.setGasbackMaxBaseFee(77));
         vm.prank(address(gasback));
         assertTrue(gasback.setBaseFeeVault(address(0x4321)));
         vm.prank(address(gasback));
-        assertTrue(gasback.setBaseFeeVaultShareNumerator(0.5 ether));
-        vm.prank(address(gasback));
         assertTrue(gasback.setAccuralWithdrawer(address(this), true));
         vm.prank(address(gasback));
         assertTrue(gasback.withdraw(address(0xB0B), 0.25 ether));
 
         assertEq(gasback.gasbackRatioNumerator(), 1 ether);
+        assertEq(gasback.baseFeeVaultShareNumerator(), 1 ether);
         assertEq(gasback.gasbackMaxBaseFee(), 77);
         assertEq(gasback.baseFeeVault(), address(0x4321));
         assertTrue(gasback.isAuthorizedAccuralWithdrawer(address(this)));
@@ -166,6 +169,19 @@ contract GasbackExtendedTest is SoladyTest {
         vm.prank(SYSTEM_ADDRESS);
         vm.expectRevert();
         gasback.setBaseFeeVaultShareNumerator(DENOMINATOR + 1);
+    }
+
+    function test_revert_setGasbackRatioNumeratorAboveBaseFeeVaultShare() public {
+        uint256 shareNumerator = gasback.baseFeeVaultShareNumerator();
+        vm.prank(SYSTEM_ADDRESS);
+        vm.expectRevert();
+        gasback.setGasbackRatioNumerator(shareNumerator + 1);
+    }
+
+    function test_revert_setBaseFeeVaultShareNumeratorBelowGasbackRatio() public {
+        vm.prank(SYSTEM_ADDRESS);
+        vm.expectRevert();
+        gasback.setBaseFeeVaultShareNumerator(0.5 ether);
     }
 
     function test_revert_fallbackInvalidCalldataLength() public {
@@ -186,7 +202,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
-        uint256 ethToGive = (ethFromGas * 0.8 ether) / DENOMINATOR;
+        uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(address(gasback), ethToGive);
         vm.fee(baseFee);
@@ -237,7 +253,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
-        uint256 ethToGive = (ethFromGas * 0.8 ether) / DENOMINATOR;
+        uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(address(gasback), ethToGive - 1);
         vm.fee(baseFee);
@@ -255,7 +271,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
-        uint256 ethToGive = (ethFromGas * 0.8 ether) / DENOMINATOR;
+        uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.prank(SYSTEM_ADDRESS);
         gasback.setGasbackMaxBaseFee(baseFee - 1);
@@ -290,7 +306,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
-        uint256 ethToGive = (ethFromGas * 0.8 ether) / DENOMINATOR;
+        uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(address(gasback), 2 * ethToGive);
         vm.fee(baseFee);
@@ -314,7 +330,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
-        uint256 ethToGive = (ethFromGas * 0.8 ether) / DENOMINATOR;
+        uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(vault, ethToGive);
         vm.fee(baseFee);
@@ -336,7 +352,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
-        uint256 ethToGive = (ethFromGas * 0.8 ether) / DENOMINATOR;
+        uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(vault, ethToGive);
         vm.fee(baseFee);
@@ -352,13 +368,13 @@ contract GasbackExtendedTest is SoladyTest {
     function test_fallbackDoesNotPullFromVaultWhenExpectedShareBelowShortfall() public {
         address vault = address(0xA002);
         vm.etch(vault, hex"60016000550000");
-        _configureBaseFeeVault(vault, 0.5 ether);
+        _configureBaseFeeVault(vault, DENOMINATOR);
 
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
 
-        vm.deal(vault, 1000);
+        vm.deal(vault, 500);
         vm.fee(baseFee);
 
         (bool success, uint256 returnedEthToGive) = _callFallback(address(0xB0B), gasToBurn);
@@ -368,7 +384,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(address(0xB0B).balance, 0);
         assertEq(gasback.accrued(), ethFromGas);
         assertEq(uint256(vm.load(vault, bytes32(0))), 0);
-        assertEq(vault.balance, 1000);
+        assertEq(vault.balance, 500);
     }
 
     function test_fallbackAttemptedVaultPullWithoutTransferFallsBackToPassThrough() public {
@@ -424,7 +440,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
-        uint256 ethToGive = (ethFromGas * 0.8 ether) / DENOMINATOR;
+        uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(address(gasback), ethToGive);
         vm.fee(baseFee);
@@ -442,7 +458,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
-        uint256 ethToGive = (ethFromGas * 0.8 ether) / DENOMINATOR;
+        uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(address(gasback), ethToGive);
         vm.fee(baseFee);
@@ -598,8 +614,10 @@ contract GasbackExtendedTest is SoladyTest {
         gasToBurn = _bound(gasToBurn, 0, 20000);
         ratioNumerator = _bound(ratioNumerator, 0, DENOMINATOR);
 
-        vm.prank(SYSTEM_ADDRESS);
+        vm.startPrank(SYSTEM_ADDRESS);
+        gasback.setBaseFeeVaultShareNumerator(DENOMINATOR);
         gasback.setGasbackRatioNumerator(ratioNumerator);
+        vm.stopPrank();
 
         uint256 ethFromGas = baseFee * gasToBurn;
         uint256 expectedEthToGive = (ethFromGas * ratioNumerator) / DENOMINATOR;
