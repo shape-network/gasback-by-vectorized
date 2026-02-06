@@ -22,6 +22,16 @@ contract RejectingCaller {
     }
 }
 
+contract AcceptingCaller {
+    function trigger(address target, uint256 gasToBurn) external returns (uint256 ethToGive) {
+        (bool success, bytes memory data) = target.call(abi.encode(gasToBurn));
+        require(success);
+        ethToGive = abi.decode(data, (uint256));
+    }
+
+    receive() external payable {}
+}
+
 contract GasbackExtendedTest is SoladyTest {
     address internal constant SYSTEM_ADDRESS = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
     address internal constant DEFAULT_BASE_FEE_VAULT = 0x4200000000000000000000000000000000000019;
@@ -424,6 +434,42 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(returnedEthToGive, ethToGive);
         assertEq(address(caller).balance, ethToGive);
         assertEq(gasback.accrued(), ethFromGas - ethToGive);
+    }
+
+    function test_fallbackPaysAcceptingContractCaller() public {
+        AcceptingCaller caller = new AcceptingCaller();
+
+        uint256 baseFee = 10;
+        uint256 gasToBurn = 100;
+        uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethToGive = (ethFromGas * 0.8 ether) / DENOMINATOR;
+
+        vm.deal(address(gasback), ethToGive);
+        vm.fee(baseFee);
+
+        uint256 returnedEthToGive = caller.trigger(address(gasback), gasToBurn);
+
+        assertEq(returnedEthToGive, ethToGive);
+        assertEq(address(caller).balance, ethToGive);
+        assertEq(gasback.accrued(), ethFromGas - ethToGive);
+        assertEq(address(gasback).balance, 0);
+    }
+
+    function test_fallbackSkipsEthSendWhenCallerRejectsAndEthToGiveIsZero() public {
+        RejectingCaller caller = new RejectingCaller();
+        vm.prank(SYSTEM_ADDRESS);
+        gasback.setGasbackRatioNumerator(0);
+
+        uint256 baseFee = 10;
+        uint256 gasToBurn = 100;
+        uint256 ethFromGas = baseFee * gasToBurn;
+
+        vm.fee(baseFee);
+        uint256 returnedEthToGive = caller.trigger(address(gasback), gasToBurn);
+
+        assertEq(returnedEthToGive, 0);
+        assertEq(address(caller).balance, 0);
+        assertEq(gasback.accrued(), ethFromGas);
     }
 
     function test_revert_withdrawWhenRecipientRejectsEth() public {
