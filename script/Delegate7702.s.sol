@@ -23,7 +23,7 @@ contract Delegate7702Script is Script {
 
         vm.startBroadcast(privateKey);
         Gasback(payable(deployer)).noop();
-        Gasback(payable(deployer)).setGasbackRatioNumerator(900000000000000000);
+        Gasback(payable(deployer)).setGasbackRatioNumerator(600000000000000000);
         Gasback(payable(deployer)).setGasbackMaxBaseFee(type(uint256).max);
         Gasback(payable(deployer)).setBaseFeeVault(0x4200000000000000000000000000000000000019);
         vm.stopBroadcast();

@@ -54,7 +54,7 @@ contract Gasback {
 
     constructor() payable {
         GasbackStorage storage $ = _getGasbackStorage();
-        $.gasbackRatioNumerator = 0.8 ether;
+        $.gasbackRatioNumerator = 0.6 ether;
         $.gasbackMaxBaseFee = type(uint256).max;
         $.baseFeeVault = 0x4200000000000000000000000000000000000019;
         $.baseFeeVaultShareNumerator = 600000000000000000;
@@ -77,6 +77,11 @@ contract Gasback {
     /// @dev The base fee vault on OP stack chains.
     function baseFeeVault() public view virtual returns (address) {
         return _getGasbackStorage().baseFeeVault;
+    }
+
+    /// @dev The numerator for the share of the base fee vault.
+    function baseFeeVaultShareNumerator() public view virtual returns (uint256) {
+        return _getGasbackStorage().baseFeeVaultShareNumerator;
     }
 
     /*«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-*/
@@ -130,8 +135,10 @@ contract Gasback {
 
     /// @dev Sets the numerator for the gasback ratio.
     function setGasbackRatioNumerator(uint256 value) public onlySystemOrThis returns (bool) {
+        GasbackStorage storage $ = _getGasbackStorage();
         require(value <= GASBACK_RATIO_DENOMINATOR);
-        _getGasbackStorage().gasbackRatioNumerator = value;
+        require(value <= $.baseFeeVaultShareNumerator);
+        $.gasbackRatioNumerator = value;
         return true;
     }
 
@@ -149,8 +156,10 @@ contract Gasback {
 
     /// @dev Sets the numerator for the share of the base fee vault.
     function setBaseFeeVaultShareNumerator(uint256 value) public onlySystemOrThis returns (bool) {
+        GasbackStorage storage $ = _getGasbackStorage();
         require(value <= GASBACK_RATIO_DENOMINATOR);
-        _getGasbackStorage().baseFeeVaultShareNumerator = value;
+        require(value >= $.gasbackRatioNumerator);
+        $.baseFeeVaultShareNumerator = value;
         return true;
     }
 
