@@ -172,16 +172,20 @@ contract GasbackExtendedTest is SoladyTest {
     }
 
     function test_revert_setGasbackRatioNumeratorAboveBaseFeeVaultShare() public {
-        uint256 shareNumerator = gasback.baseFeeVaultShareNumerator();
-        vm.prank(SYSTEM_ADDRESS);
+        vm.startPrank(SYSTEM_ADDRESS);
+        assertTrue(gasback.setBaseFeeVaultShareNumerator(0.7 ether));
         vm.expectRevert();
-        gasback.setGasbackRatioNumerator(shareNumerator + 1);
+        gasback.setGasbackRatioNumerator(0.700000000000000001 ether);
+        vm.stopPrank();
     }
 
     function test_revert_setBaseFeeVaultShareNumeratorBelowGasbackRatio() public {
-        vm.prank(SYSTEM_ADDRESS);
+        vm.startPrank(SYSTEM_ADDRESS);
+        assertTrue(gasback.setBaseFeeVaultShareNumerator(0.9 ether));
+        assertTrue(gasback.setGasbackRatioNumerator(0.8 ether));
         vm.expectRevert();
-        gasback.setBaseFeeVaultShareNumerator(0.5 ether);
+        gasback.setBaseFeeVaultShareNumerator(0.79 ether);
+        vm.stopPrank();
     }
 
     function test_revert_fallbackInvalidCalldataLength() public {
