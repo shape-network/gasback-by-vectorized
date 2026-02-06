@@ -207,6 +207,22 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(gasback.accrued(), ethFromGas);
     }
 
+    function test_fallbackZeroGasToBurnNoops() public {
+        vm.deal(address(gasback), 1 ether);
+        vm.fee(123);
+
+        uint256 beforeBalance = address(gasback).balance;
+        uint256 beforeAccrued = gasback.accrued();
+
+        (bool success, uint256 returnedEthToGive) = _callFallback(address(0xB0B), 0);
+
+        assertTrue(success);
+        assertEq(returnedEthToGive, 0);
+        assertEq(address(0xB0B).balance, 0);
+        assertEq(address(gasback).balance, beforeBalance);
+        assertEq(gasback.accrued(), beforeAccrued);
+    }
+
     function test_fallbackPassThroughWhenInsufficientBalance() public {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
@@ -424,6 +440,20 @@ contract GasbackExtendedTest is SoladyTest {
 
     function test_revert_withdrawAccruedUnauthorized() public {
         _accrueViaPassThrough(10, 100);
+        vm.expectRevert();
+        gasback.withdrawAccrued(address(this), 1);
+    }
+
+    function test_setAccuralWithdrawerRevokeBlocksWithdrawAccrued() public {
+        _accrueViaPassThrough(10, 100);
+
+        vm.startPrank(SYSTEM_ADDRESS);
+        gasback.setAccuralWithdrawer(address(this), true);
+        gasback.setAccuralWithdrawer(address(this), false);
+        vm.stopPrank();
+
+        assertFalse(gasback.isAuthorizedAccuralWithdrawer(address(this)));
+
         vm.expectRevert();
         gasback.withdrawAccrued(address(this), 1);
     }
