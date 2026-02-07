@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
-import {GasbackTestCaller} from "../src/GasbackTestCaller.sol";
+import {GasbackTestCaller} from "../src/test/GasbackTestCaller.sol";
 
 contract DeployGasbackTestCallerScript is Script {
     error WrongChain(uint256 chainId);
