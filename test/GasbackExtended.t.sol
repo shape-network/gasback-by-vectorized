@@ -55,15 +55,24 @@ contract GasbackExtendedTest is SoladyTest {
         }
     }
 
-    function _accrueViaPassThrough(uint256 baseFee, uint256 gasToBurn)
+    function _accrueViaPayout(uint256 baseFee, uint256 gasToBurn)
         internal
-        returns (uint256 ethFromGas)
+        returns (uint256 accruedDelta)
     {
-        ethFromGas = baseFee * gasToBurn;
+        uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethFromVaultShare =
+            (ethFromGas * gasback.baseFeeVaultShareNumerator()) / DENOMINATOR;
+        uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
+        uint256 beforeAccrued = gasback.accrued();
+
+        vm.deal(address(gasback), ethToGive);
         vm.fee(baseFee);
-        (bool success,) = _callFallback(address(0xA11CE), gasToBurn);
+        (bool success, uint256 returnedEthToGive) = _callFallback(address(0xA11CE), gasToBurn);
         assertTrue(success);
-        assertEq(gasback.accrued(), ethFromGas);
+        assertEq(returnedEthToGive, ethToGive);
+
+        accruedDelta = gasback.accrued() - beforeAccrued;
+        assertEq(accruedDelta, ethFromVaultShare - ethToGive);
     }
 
     function _configureBaseFeeVault(address vault, uint256 shareNumerator) internal {
@@ -74,7 +83,7 @@ contract GasbackExtendedTest is SoladyTest {
     }
 
     function test_constructorDefaults() public {
-        assertEq(gasback.gasbackRatioNumerator(), 0.6 ether);
+        assertEq(gasback.gasbackRatioNumerator(), 0.5 ether);
         assertEq(gasback.gasbackMaxBaseFee(), type(uint256).max);
         assertEq(gasback.baseFeeVault(), DEFAULT_BASE_FEE_VAULT);
         assertEq(gasback.baseFeeVaultShareNumerator(), 0.6 ether);
@@ -206,6 +215,8 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethFromVaultShare =
+            (ethFromGas * gasback.baseFeeVaultShareNumerator()) / DENOMINATOR;
         uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(address(gasback), ethToGive);
@@ -216,7 +227,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertTrue(success);
         assertEq(returnedEthToGive, ethToGive);
         assertEq(address(0xB0B).balance, ethToGive);
-        assertEq(gasback.accrued(), ethFromGas - ethToGive);
+        assertEq(gasback.accrued(), ethFromVaultShare - ethToGive);
         assertEq(address(gasback).balance, 0);
     }
 
@@ -227,6 +238,8 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 13;
         uint256 gasToBurn = 101;
         uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethFromVaultShare =
+            (ethFromGas * gasback.baseFeeVaultShareNumerator()) / DENOMINATOR;
 
         vm.fee(baseFee);
         (bool success, uint256 returnedEthToGive) = _callFallback(address(0xB0B), gasToBurn);
@@ -234,7 +247,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertTrue(success);
         assertEq(returnedEthToGive, 0);
         assertEq(address(0xB0B).balance, 0);
-        assertEq(gasback.accrued(), ethFromGas);
+        assertEq(gasback.accrued(), ethFromVaultShare);
     }
 
     function test_fallbackZeroGasToBurnNoops() public {
@@ -257,6 +270,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 beforeAccrued = gasback.accrued();
         uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(address(gasback), ethToGive - 1);
@@ -267,7 +281,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertTrue(success);
         assertEq(returnedEthToGive, 0);
         assertEq(address(0xB0B).balance, 0);
-        assertEq(gasback.accrued(), ethFromGas);
+        assertEq(gasback.accrued(), beforeAccrued);
         assertEq(address(gasback).balance, ethToGive - 1);
     }
 
@@ -275,6 +289,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 beforeAccrued = gasback.accrued();
         uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.prank(SYSTEM_ADDRESS);
@@ -288,7 +303,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertTrue(success);
         assertEq(returnedEthToGive, 0);
         assertEq(address(0xB0B).balance, 0);
-        assertEq(gasback.accrued(), ethFromGas);
+        assertEq(gasback.accrued(), beforeAccrued);
         assertEq(address(gasback).balance, ethToGive);
     }
 
@@ -310,6 +325,8 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethFromVaultShare =
+            (ethFromGas * gasback.baseFeeVaultShareNumerator()) / DENOMINATOR;
         uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(address(gasback), 2 * ethToGive);
@@ -322,7 +339,10 @@ contract GasbackExtendedTest is SoladyTest {
         assertTrue(success1);
         assertEq(address(0x1111).balance, ethToGive);
         assertEq(address(0x2222).balance, ethToGive);
-        assertEq(gasback.accrued(), 2 * (ethFromGas - ethToGive));
+        assertEq(gasback.accrued(), 2 * (ethFromVaultShare - ethToGive));
+        assertEq(
+            gasback.accrued() + address(0x1111).balance + address(0x2222).balance, 2 * ethFromVaultShare
+        );
         assertEq(address(gasback).balance, 0);
     }
 
@@ -334,6 +354,8 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethFromVaultShare =
+            (ethFromGas * gasback.baseFeeVaultShareNumerator()) / DENOMINATOR;
         uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(vault, ethToGive);
@@ -344,7 +366,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertTrue(success);
         assertEq(returnedEthToGive, ethToGive);
         assertEq(address(0xB0B).balance, ethToGive);
-        assertEq(gasback.accrued(), ethFromGas - ethToGive);
+        assertEq(gasback.accrued(), ethFromVaultShare - ethToGive);
         assertEq(vault.balance, 0);
     }
 
@@ -356,6 +378,8 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethFromVaultShare =
+            (ethFromGas * gasback.baseFeeVaultShareNumerator()) / DENOMINATOR;
         uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(vault, ethToGive);
@@ -366,6 +390,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertTrue(success);
         assertEq(returnedEthToGive, ethToGive);
         assertEq(address(0xB0B).balance, ethToGive);
+        assertEq(gasback.accrued(), ethFromVaultShare - ethToGive);
         assertEq(vault.balance, 0);
     }
 
@@ -376,9 +401,9 @@ contract GasbackExtendedTest is SoladyTest {
 
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
-        uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 beforeAccrued = gasback.accrued();
 
-        vm.deal(vault, 500);
+        vm.deal(vault, 499);
         vm.fee(baseFee);
 
         (bool success, uint256 returnedEthToGive) = _callFallback(address(0xB0B), gasToBurn);
@@ -386,9 +411,9 @@ contract GasbackExtendedTest is SoladyTest {
         assertTrue(success);
         assertEq(returnedEthToGive, 0);
         assertEq(address(0xB0B).balance, 0);
-        assertEq(gasback.accrued(), ethFromGas);
+        assertEq(gasback.accrued(), beforeAccrued);
         assertEq(uint256(vm.load(vault, bytes32(0))), 0);
-        assertEq(vault.balance, 500);
+        assertEq(vault.balance, 499);
     }
 
     function test_fallbackAttemptedVaultPullWithoutTransferFallsBackToPassThrough() public {
@@ -398,7 +423,7 @@ contract GasbackExtendedTest is SoladyTest {
 
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
-        uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 beforeAccrued = gasback.accrued();
 
         vm.deal(vault, 1000);
         vm.fee(baseFee);
@@ -408,7 +433,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertTrue(success);
         assertEq(returnedEthToGive, 0);
         assertEq(address(0xB0B).balance, 0);
-        assertEq(gasback.accrued(), ethFromGas);
+        assertEq(gasback.accrued(), beforeAccrued);
         assertEq(uint256(vm.load(vault, bytes32(0))), 1);
         assertEq(vault.balance, 1000);
     }
@@ -419,7 +444,7 @@ contract GasbackExtendedTest is SoladyTest {
 
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
-        uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 beforeAccrued = gasback.accrued();
 
         vm.startPrank(SYSTEM_ADDRESS);
         gasback.setBaseFeeVault(vault);
@@ -434,7 +459,7 @@ contract GasbackExtendedTest is SoladyTest {
 
         assertTrue(success);
         assertEq(returnedEthToGive, 0);
-        assertEq(gasback.accrued(), ethFromGas);
+        assertEq(gasback.accrued(), beforeAccrued);
         assertEq(uint256(vm.load(vault, bytes32(0))), 0);
     }
 
@@ -444,6 +469,8 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethFromVaultShare =
+            (ethFromGas * gasback.baseFeeVaultShareNumerator()) / DENOMINATOR;
         uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(address(gasback), ethToGive);
@@ -453,7 +480,7 @@ contract GasbackExtendedTest is SoladyTest {
 
         assertEq(returnedEthToGive, ethToGive);
         assertEq(address(caller).balance, ethToGive);
-        assertEq(gasback.accrued(), ethFromGas - ethToGive);
+        assertEq(gasback.accrued(), ethFromVaultShare - ethToGive);
     }
 
     function test_fallbackPaysAcceptingContractCaller() public {
@@ -462,6 +489,8 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethFromVaultShare =
+            (ethFromGas * gasback.baseFeeVaultShareNumerator()) / DENOMINATOR;
         uint256 ethToGive = (ethFromGas * gasback.gasbackRatioNumerator()) / DENOMINATOR;
 
         vm.deal(address(gasback), ethToGive);
@@ -471,7 +500,7 @@ contract GasbackExtendedTest is SoladyTest {
 
         assertEq(returnedEthToGive, ethToGive);
         assertEq(address(caller).balance, ethToGive);
-        assertEq(gasback.accrued(), ethFromGas - ethToGive);
+        assertEq(gasback.accrued(), ethFromVaultShare - ethToGive);
         assertEq(address(gasback).balance, 0);
     }
 
@@ -483,13 +512,15 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 baseFee = 10;
         uint256 gasToBurn = 100;
         uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 ethFromVaultShare =
+            (ethFromGas * gasback.baseFeeVaultShareNumerator()) / DENOMINATOR;
 
         vm.fee(baseFee);
         uint256 returnedEthToGive = caller.trigger(address(gasback), gasToBurn);
 
         assertEq(returnedEthToGive, 0);
         assertEq(address(caller).balance, 0);
-        assertEq(gasback.accrued(), ethFromGas);
+        assertEq(gasback.accrued(), ethFromVaultShare);
     }
 
     function test_revert_withdrawWhenRecipientRejectsEth() public {
@@ -510,29 +541,30 @@ contract GasbackExtendedTest is SoladyTest {
     }
 
     function test_withdrawAccruedAuthorizedSuccess() public {
-        uint256 accruedAmount = _accrueViaPassThrough(10, 100);
+        uint256 accruedAmount = _accrueViaPayout(10, 100);
         vm.deal(address(gasback), accruedAmount);
+        uint256 withdrawAmount = 40;
 
         vm.prank(SYSTEM_ADDRESS);
         gasback.setAccuralWithdrawer(address(this), true);
 
         address recipient = address(0xCAFE);
         uint256 before = recipient.balance;
-        bool success = gasback.withdrawAccrued(recipient, 400);
+        bool success = gasback.withdrawAccrued(recipient, withdrawAmount);
 
         assertTrue(success);
-        assertEq(recipient.balance - before, 400);
-        assertEq(gasback.accrued(), accruedAmount - 400);
+        assertEq(recipient.balance - before, withdrawAmount);
+        assertEq(gasback.accrued(), accruedAmount - withdrawAmount);
     }
 
     function test_revert_withdrawAccruedUnauthorized() public {
-        _accrueViaPassThrough(10, 100);
+        _accrueViaPayout(10, 100);
         vm.expectRevert();
         gasback.withdrawAccrued(address(this), 1);
     }
 
     function test_withdrawAccruedRequireBranchTrue_authorized() public {
-        uint256 accruedAmount = _accrueViaPassThrough(10, 100);
+        uint256 accruedAmount = _accrueViaPayout(10, 100);
         vm.deal(address(gasback), accruedAmount);
 
         vm.prank(SYSTEM_ADDRESS);
@@ -548,7 +580,7 @@ contract GasbackExtendedTest is SoladyTest {
     }
 
     function test_withdrawAccruedRequireBranchFalse_unauthorizedReverts() public {
-        uint256 accruedAmount = _accrueViaPassThrough(10, 100);
+        uint256 accruedAmount = _accrueViaPayout(10, 100);
         vm.deal(address(gasback), accruedAmount);
 
         vm.expectRevert();
@@ -558,7 +590,7 @@ contract GasbackExtendedTest is SoladyTest {
     }
 
     function test_setAccuralWithdrawerRevokeBlocksWithdrawAccrued() public {
-        _accrueViaPassThrough(10, 100);
+        _accrueViaPayout(10, 100);
 
         vm.startPrank(SYSTEM_ADDRESS);
         gasback.setAccuralWithdrawer(address(this), true);
@@ -572,7 +604,7 @@ contract GasbackExtendedTest is SoladyTest {
     }
 
     function test_revert_withdrawAccruedUnderflow() public {
-        uint256 accruedAmount = _accrueViaPassThrough(10, 100);
+        uint256 accruedAmount = _accrueViaPayout(10, 100);
 
         vm.prank(SYSTEM_ADDRESS);
         gasback.setAccuralWithdrawer(address(this), true);
@@ -585,7 +617,7 @@ contract GasbackExtendedTest is SoladyTest {
 
     function test_revert_withdrawAccruedWhenRecipientRejectsEth() public {
         RejectingReceiver rejector = new RejectingReceiver();
-        uint256 accruedAmount = _accrueViaPassThrough(10, 100);
+        uint256 accruedAmount = _accrueViaPayout(10, 100);
         vm.deal(address(gasback), accruedAmount);
 
         vm.prank(SYSTEM_ADDRESS);
@@ -598,7 +630,7 @@ contract GasbackExtendedTest is SoladyTest {
     }
 
     function test_revert_withdrawAccruedWhenBalanceInsufficient() public {
-        uint256 accruedAmount = _accrueViaPassThrough(10, 100);
+        uint256 accruedAmount = _accrueViaPayout(10, 100);
 
         vm.prank(SYSTEM_ADDRESS);
         gasback.setAccuralWithdrawer(address(this), true);
@@ -624,6 +656,8 @@ contract GasbackExtendedTest is SoladyTest {
         vm.stopPrank();
 
         uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 expectedEthFromVaultShare =
+            (ethFromGas * gasback.baseFeeVaultShareNumerator()) / DENOMINATOR;
         uint256 expectedEthToGive = (ethFromGas * ratioNumerator) / DENOMINATOR;
 
         vm.deal(address(gasback), expectedEthToGive);
@@ -634,7 +668,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertTrue(success);
         assertEq(returnedEthToGive, expectedEthToGive);
         assertEq(address(0xB0B).balance, expectedEthToGive);
-        assertEq(gasback.accrued(), ethFromGas - expectedEthToGive);
+        assertEq(gasback.accrued(), expectedEthFromVaultShare - expectedEthToGive);
     }
 
     function testFuzz_fallbackPassThroughOnInsufficientBalance(uint256 baseFee, uint256 gasToBurn)
@@ -642,8 +676,7 @@ contract GasbackExtendedTest is SoladyTest {
     {
         baseFee = _bound(baseFee, 1, 1e12);
         gasToBurn = _bound(gasToBurn, 1, 20000);
-
-        uint256 ethFromGas = baseFee * gasToBurn;
+        uint256 beforeAccrued = gasback.accrued();
 
         vm.fee(baseFee);
         (bool success, uint256 returnedEthToGive) = _callFallback(address(0xB0B), gasToBurn);
@@ -651,7 +684,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertTrue(success);
         assertEq(returnedEthToGive, 0);
         assertEq(address(0xB0B).balance, 0);
-        assertEq(gasback.accrued(), ethFromGas);
+        assertEq(gasback.accrued(), beforeAccrued);
     }
 
     function testRevertSetBaseFeeVaultShareNumeratorAboveDenominator() public {

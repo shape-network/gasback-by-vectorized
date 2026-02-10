@@ -6,6 +6,7 @@ import {GasbackTestCaller} from "../src/test/GasbackTestCaller.sol";
 
 interface IGasbackRead {
     function gasbackRatioNumerator() external view returns (uint256);
+    function baseFeeVaultShareNumerator() external view returns (uint256);
     function gasbackMaxBaseFee() external view returns (uint256);
     function accrued() external view returns (uint256);
 }
@@ -18,12 +19,12 @@ contract TestGasbackTestCallerScript is Script {
     error CallerBalanceDeltaMismatch(uint256 expectedDelta, uint256 observedDelta);
     error AccruedDecreased(uint256 beforeAccrued, uint256 afterAccrued);
     error UnexpectedZeroGasResult(uint256 payout, uint256 accruedDelta);
-    error AccruedInvariantBroke(uint256 accruedDelta, uint256 payout, uint256 gasToBurn);
-    error PayoutExceedsRatio(uint256 payout, uint256 maxPayoutByRatio);
+    error PayoutExceedsTrackedShare(uint256 payout, uint256 trackedFromGas);
+    error UnexpectedPayoutWithZeroRatio(uint256 payout);
+    error EqualRatioShareMismatch(uint256 payout, uint256 trackedFromGas);
     error ExpectedPassThrough(uint256 realizedBaseFee, uint256 maxBaseFee, uint256 payout);
 
     uint256 internal constant SHAPE_SEPOLIA_CHAIN_ID = 11011;
-    uint256 internal constant DENOMINATOR = 1 ether;
     uint256 internal constant DEFAULT_GAS_TO_BURN = 30_000;
     address internal constant DEFAULT_SHAPE_SEPOLIA_CALLER =
         0x746E1dA1Dd0705640e93B1b8a4Db820fE29d19A5;
@@ -58,6 +59,7 @@ contract TestGasbackTestCallerScript is Script {
         internal
     {
         uint256 ratioNumerator = gasback.gasbackRatioNumerator();
+        uint256 shareNumerator = gasback.baseFeeVaultShareNumerator();
         uint256 maxBaseFee = gasback.gasbackMaxBaseFee();
 
         uint256 callerBalanceBefore = address(caller).balance;
@@ -95,27 +97,26 @@ contract TestGasbackTestCallerScript is Script {
             return;
         }
 
-        uint256 totalFromGas = accruedDelta + payout;
-        if (totalFromGas % gasToBurn != 0) {
-            revert AccruedInvariantBroke(accruedDelta, payout, gasToBurn);
+        uint256 trackedFromGas = accruedDelta + payout;
+        if (ratioNumerator == 0 && payout != 0) {
+            revert UnexpectedPayoutWithZeroRatio(payout);
         }
-
-        uint256 realizedBaseFee = totalFromGas / gasToBurn;
-        uint256 maxPayoutByRatio = (totalFromGas * ratioNumerator) / DENOMINATOR;
-        if (payout > maxPayoutByRatio) {
-            revert PayoutExceedsRatio(payout, maxPayoutByRatio);
+        if (payout > trackedFromGas) {
+            revert PayoutExceedsTrackedShare(payout, trackedFromGas);
         }
-
-        if (realizedBaseFee > maxBaseFee && payout != 0) {
-            revert ExpectedPassThrough(realizedBaseFee, maxBaseFee, payout);
+        if (ratioNumerator == shareNumerator && payout != trackedFromGas) {
+            revert EqualRatioShareMismatch(payout, trackedFromGas);
+        }
+        if (block.basefee > maxBaseFee && trackedFromGas != 0) {
+            revert ExpectedPassThrough(block.basefee, maxBaseFee, payout);
         }
 
         console2.log("Case gasToBurn:", gasToBurn);
         console2.log("Payout:", payout);
         console2.log("Accrued delta:", accruedDelta);
-        console2.log("Realized base fee:", realizedBaseFee);
-        console2.log("Max payout by ratio:", maxPayoutByRatio);
+        console2.log("Tracked from gas (accrued + payout):", trackedFromGas);
         console2.log("Ratio numerator used:", ratioNumerator);
+        console2.log("Vault share numerator used:", shareNumerator);
         console2.log("Max base fee used:", maxBaseFee);
     }
 }

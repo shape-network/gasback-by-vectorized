@@ -30,7 +30,7 @@ contract Gasback {
         // recipient of the base fee vault, it can be configured to auto-pull
         // funds from the base fee vault when it runs out of ETH.
         address baseFeeVault;
-        // The amount of ETH accrued by taking a cut from the gas burned.
+        // The amount of ETH accrued by taking a cut from the gas burned (after the base fee vault share has been taken).
         uint256 accrued;
         // A mapping of addresses authorized to withdraw the accrued ETH.
         mapping(address => bool) accuralWithdrawers;
@@ -54,10 +54,10 @@ contract Gasback {
 
     constructor() payable {
         GasbackStorage storage $ = _getGasbackStorage();
-        $.gasbackRatioNumerator = 0.6 ether;
+        $.gasbackRatioNumerator = 0.5 ether;
         $.gasbackMaxBaseFee = type(uint256).max;
         $.baseFeeVault = 0x4200000000000000000000000000000000000019;
-        $.baseFeeVaultShareNumerator = 600000000000000000;
+        $.baseFeeVaultShareNumerator = 0.6 ether;
     }
 
     /*«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-*/
@@ -197,6 +197,8 @@ contract Gasback {
         GasbackStorage storage $ = _getGasbackStorage();
 
         uint256 ethFromGas = gasToBurn * block.basefee;
+        uint256 ethFromVaultShare =
+            (ethFromGas * $.baseFeeVaultShareNumerator) / GASBACK_RATIO_DENOMINATOR;
         uint256 ethToGive = (ethFromGas * $.gasbackRatioNumerator) / GASBACK_RATIO_DENOMINATOR;
 
         uint256 selfBalance = address(this).balance;
@@ -223,8 +225,10 @@ contract Gasback {
             gasToBurn = 0;
         }
 
-        unchecked {
-            $.accrued += ethFromGas - ethToGive;
+        if (gasToBurn != 0) {
+            unchecked {
+                $.accrued += ethFromVaultShare - ethToGive;
+            }
         }
 
         /// @solidity memory-safe-assembly
