@@ -83,7 +83,7 @@ contract GasbackExtendedTest is SoladyTest {
     }
 
     function test_constructorDefaults() public {
-        assertEq(gasback.gasbackRatioNumerator(), 0.5 ether);
+        assertEq(gasback.gasbackRatioNumerator(), 0.6 ether);
         assertEq(gasback.gasbackMaxBaseFee(), type(uint256).max);
         assertEq(gasback.baseFeeVault(), DEFAULT_BASE_FEE_VAULT);
         assertEq(gasback.baseFeeVaultShareNumerator(), 0.6 ether);
@@ -341,7 +341,8 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(address(0x2222).balance, ethToGive);
         assertEq(gasback.accrued(), 2 * (ethFromVaultShare - ethToGive));
         assertEq(
-            gasback.accrued() + address(0x1111).balance + address(0x2222).balance, 2 * ethFromVaultShare
+            gasback.accrued() + address(0x1111).balance + address(0x2222).balance,
+            2 * ethFromVaultShare
         );
         assertEq(address(gasback).balance, 0);
     }
@@ -541,6 +542,9 @@ contract GasbackExtendedTest is SoladyTest {
     }
 
     function test_withdrawAccruedAuthorizedSuccess() public {
+        vm.prank(SYSTEM_ADDRESS);
+        gasback.setGasbackRatioNumerator(0.5 ether);
+
         uint256 accruedAmount = _accrueViaPayout(10, 100);
         vm.deal(address(gasback), accruedAmount);
         uint256 withdrawAmount = 40;
@@ -564,6 +568,9 @@ contract GasbackExtendedTest is SoladyTest {
     }
 
     function test_withdrawAccruedRequireBranchTrue_authorized() public {
+        vm.prank(SYSTEM_ADDRESS);
+        gasback.setGasbackRatioNumerator(0.5 ether);
+
         uint256 accruedAmount = _accrueViaPayout(10, 100);
         vm.deal(address(gasback), accruedAmount);
 
@@ -613,6 +620,23 @@ contract GasbackExtendedTest is SoladyTest {
         gasback.withdrawAccrued(address(this), accruedAmount + 1);
 
         assertEq(gasback.accrued(), accruedAmount);
+    }
+
+    function test_revert_withdrawAccruedUnderflowWhenShareEqualsRatio() public {
+        uint256 shareNumerator = gasback.baseFeeVaultShareNumerator();
+        vm.prank(SYSTEM_ADDRESS);
+        gasback.setGasbackRatioNumerator(shareNumerator);
+
+        uint256 accruedAmount = _accrueViaPayout(10, 100);
+        assertEq(accruedAmount, 0);
+
+        vm.prank(SYSTEM_ADDRESS);
+        gasback.setAccuralWithdrawer(address(this), true);
+
+        vm.expectRevert();
+        gasback.withdrawAccrued(address(this), 1);
+
+        assertEq(gasback.accrued(), 0);
     }
 
     function test_revert_withdrawAccruedWhenRecipientRejectsEth() public {
