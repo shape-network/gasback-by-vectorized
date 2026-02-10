@@ -74,7 +74,7 @@ contract GasbackExtendedTest is SoladyTest {
     }
 
     function test_constructorDefaults() public {
-        assertEq(gasback.gasbackRatioNumerator(), 0.6 ether);
+        assertEq(gasback.gasbackRatioNumerator(), 0.5 ether);
         assertEq(gasback.gasbackMaxBaseFee(), type(uint256).max);
         assertEq(gasback.baseFeeVault(), DEFAULT_BASE_FEE_VAULT);
         assertEq(gasback.baseFeeVaultShareNumerator(), 0.6 ether);
