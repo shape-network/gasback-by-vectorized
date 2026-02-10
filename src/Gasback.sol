@@ -197,6 +197,8 @@ contract Gasback {
         GasbackStorage storage $ = _getGasbackStorage();
 
         uint256 ethFromGas = gasToBurn * block.basefee;
+        uint256 ethFromVaultShare =
+            (ethFromGas * $.baseFeeVaultShareNumerator) / GASBACK_RATIO_DENOMINATOR;
         uint256 ethToGive = (ethFromGas * $.gasbackRatioNumerator) / GASBACK_RATIO_DENOMINATOR;
 
         uint256 selfBalance = address(this).balance;
@@ -223,8 +225,10 @@ contract Gasback {
             gasToBurn = 0;
         }
 
-        unchecked {
-            $.accrued += ethFromGas - ethToGive;
+        if (gasToBurn != 0) {
+            unchecked {
+                $.accrued += ethFromVaultShare - ethToGive;
+            }
         }
 
         /// @solidity memory-safe-assembly
