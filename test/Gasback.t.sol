@@ -23,7 +23,8 @@ contract GasbackTest is SoladyTest {
         assertTrue(success);
         assertEq(
             pranker.balance,
-            (gasToBurn * baseFee * gasback.gasbackRatioNumerator()) / gasback.GASBACK_RATIO_DENOMINATOR()
+            (gasToBurn * baseFee * gasback.gasbackRatioNumerator())
+                / gasback.GASBACK_RATIO_DENOMINATOR()
         );
     }
 
@@ -62,5 +63,4 @@ contract GasbackTest is SoladyTest {
         assertTrue(success);
         assertEq(pranker.balance, 0);
     }
-
 }

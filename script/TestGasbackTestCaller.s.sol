@@ -27,7 +27,7 @@ contract TestGasbackTestCallerScript is Script {
     uint256 internal constant SHAPE_SEPOLIA_CHAIN_ID = 11011;
     uint256 internal constant DEFAULT_GAS_TO_BURN = 30_000;
     address internal constant DEFAULT_SHAPE_SEPOLIA_CALLER =
-        0x746E1dA1Dd0705640e93B1b8a4Db820fE29d19A5;
+        0xA53D127f193858f5ef2Cf50dd1B3A94198ef811d;
 
     function run() external {
         if (block.chainid != SHAPE_SEPOLIA_CHAIN_ID) revert WrongChain(block.chainid);
@@ -55,9 +55,12 @@ contract TestGasbackTestCallerScript is Script {
         console2.log("All checks passed.");
     }
 
-    function _runCase(uint256 privateKey, GasbackTestCaller caller, IGasbackRead gasback, uint256 gasToBurn)
-        internal
-    {
+    function _runCase(
+        uint256 privateKey,
+        GasbackTestCaller caller,
+        IGasbackRead gasback,
+        uint256 gasToBurn
+    ) internal {
         uint256 ratioNumerator = gasback.gasbackRatioNumerator();
         uint256 shareNumerator = gasback.baseFeeVaultShareNumerator();
         uint256 maxBaseFee = gasback.gasbackMaxBaseFee();
