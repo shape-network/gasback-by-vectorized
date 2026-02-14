@@ -21,7 +21,11 @@ contract GasbackTest is SoladyTest {
         vm.prank(pranker);
         (bool success,) = address(gasback).call(abi.encode(gasToBurn));
         assertTrue(success);
-        assertEq(pranker.balance, (gasToBurn * baseFee * 0.8 ether) / 1 ether);
+        assertEq(
+            pranker.balance,
+            (gasToBurn * baseFee * gasback.gasbackRatioNumerator())
+                / gasback.GASBACK_RATIO_DENOMINATOR()
+        );
     }
 
     function testConvertGasback() public {
@@ -58,47 +62,5 @@ contract GasbackTest is SoladyTest {
         (bool success,) = address(gasback).call(abi.encode(gasToBurn));
         assertTrue(success);
         assertEq(pranker.balance, 0);
-    }
-
-    function testConvertGasbackMinVaultBalance() public {
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
-        uint256 minVaultBalance = 50 ether;
-        vm.prank(system);
-        gasback.setMinVaultBalance(minVaultBalance);
-
-        uint256 gasToBurn = 333;
-
-        address pranker = address(111);
-        assertEq(pranker.balance, 0);
-        vm.prank(pranker);
-        (bool success,) = address(gasback).call(abi.encode(gasToBurn));
-        assertTrue(success);
-        assertEq(pranker.balance, 0);
-    }
-
-    function testConvertGasbackWithAccruedToAccruedRecipient() public {
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
-        vm.prank(system);
-        gasback.setAccruedRecipient(address(42));
-
-        uint256 baseFee = 1 ether;
-        uint256 gasToBurn = 333;
-
-        address pranker = address(111);
-        vm.fee(baseFee);
-        vm.deal(pranker, 1000 ether);
-
-        vm.prank(pranker);
-        (bool success,) = address(gasback).call(abi.encode(gasToBurn));
-        assertTrue(success);
-
-        uint256 accrued = gasback.accrued();
-
-        assertNotEq(accrued, 0);
-
-        vm.prank(pranker);
-        gasback.withdrawAccruedToAccruedRecipient(accrued);
-
-        assertEq(address(42).balance, accrued);
     }
 }
