@@ -41,3 +41,7 @@ create2
 
 # Coverage report
 report
+
+# Gasback live test reports
+gasback-live-report.json
+gasback-live-report.*.json

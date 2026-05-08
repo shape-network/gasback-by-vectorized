@@ -1,0 +1,21 @@
+{
+  "name": "gasback-by-vectorized",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gasback:local": "bun run live/gasback-live.ts local",
+    "gasback:fork": "bun run live/gasback-live.ts fork",
+    "gasback:report": "bun run live/gasback-live.ts report",
+    "gasback:canary": "bun run live/gasback-live.ts canary",
+    "test:ts": "bun test live",
+    "check-types": "tsc --noEmit",
+    "lint": "bun test live && tsc --noEmit"
+  },
+  "dependencies": {
+    "viem": "^2.33.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.1",
+    "typescript": "^5.9.3"
+  }
+}

@@ -5,12 +5,22 @@ on:
     branches: [main]
     paths:
       - '**.sol'
+      - '**.ts'
       - '**.yml'
+      - '.env.example'
+      - 'bun.lock'
+      - 'package.json'
+      - 'tsconfig.json'
   push:
     branches: [main]
     paths:
       - '**.sol'
+      - '**.ts'
       - '**.yml'
+      - '.env.example'
+      - 'bun.lock'
+      - 'package.json'
+      - 'tsconfig.json'
 jobs:
   tests:
     name: Forge Testing
@@ -34,11 +44,43 @@ jobs:
       - name: Run Tests with ${{ matrix.profile }}
         run: >
           ( [ "${{ matrix.profile }}" = "regular" ] &&
-            forge test
+            forge test --disable-labels
           ) ||
           ( [ "${{ matrix.profile }}" = "intense" ] &&
-            forge test --fuzz-runs 5000
+            forge test --disable-labels --fuzz-runs 5000
           )
+
+  gasback-live-system:
+    name: Gasback live system checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.9
+
+      - name: Install Foundry Dependencies
+        run: forge install
+
+      - name: Install TypeScript Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run TypeScript Tests
+        run: bun run lint
+
+      - name: Run Local Gasback Suite
+        run: bun run gasback:local
+
+      - name: Run Fork Gasback Suite
+        run: bun run gasback:fork
 
   codespell:
     runs-on: ${{ matrix.os }}
@@ -57,4 +99,3 @@ jobs:
           check_filenames: true
           ignore_words_list: usera
           skip: ./.git,package-lock.json,ackee-blockchain-solady-report.pdf,EIP712Mock.sol
-
