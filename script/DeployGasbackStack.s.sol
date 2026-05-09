@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {Gasback} from "../src/Gasback.sol";
-import {ShapePaymentSplitter} from "../src/ShapePaymentSplitter.sol";
+import {ShapePaymentSplitter} from "../src/standard-interactions/ShapePaymentSplitter.sol";
 import {GasbackTestCaller} from "../src/test/GasbackTestCaller.sol";
 
 contract DeployGasbackStackScript is Script {

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
-import {ShapePaymentSplitter} from "../src/ShapePaymentSplitter.sol";
+import {ShapePaymentSplitter} from "../src/standard-interactions/ShapePaymentSplitter.sol";
 
 contract DeployShapePaymentSplitterScript is Script {
     function run() external returns (ShapePaymentSplitter deployed) {
