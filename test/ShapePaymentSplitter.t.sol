@@ -2,7 +2,7 @@
 pragma solidity ^0.8.4;
 
 import "./utils/SoladyTest.sol";
-import {ShapePaymentSplitter} from "../src/ShapePaymentSplitter.sol";
+import {ShapePaymentSplitter} from "../src/standard-interactions/ShapePaymentSplitter.sol";
 
 contract RejectingPayee {
     receive() external payable {
