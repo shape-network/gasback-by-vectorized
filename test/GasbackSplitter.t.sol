@@ -1,0 +1,487 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.4;
+
+import "./utils/SoladyTest.sol";
+import {GasbackSplitter} from "../src/GasbackSplitter.sol";
+
+contract RejectingGasbackSplitterPayee {
+    receive() external payable {
+        revert("I reject ETH");
+    }
+}
+
+contract ReentrantGasbackSplitterPayee {
+    GasbackSplitter public splitter;
+
+    function setSplitter(GasbackSplitter splitter_) external {
+        splitter = splitter_;
+    }
+
+    receive() external payable {
+        (bool success,) = address(splitter).call{value: 1}("");
+        require(success, "reenter failed");
+    }
+}
+
+contract GasbackSplitterTest is SoladyTest {
+    event PaymentFailed(address to, uint256 amount, bytes reason);
+    event PaymentReceived(address from, uint256 amount);
+    event PaymentReleased(address to, uint256 amount);
+
+    GasbackSplitter public splitter;
+
+    struct FuzzTestState {
+        address[] fuzzPayees;
+        uint256[] fuzzShares;
+        uint256[] initialBalances;
+        uint256 totalSharesSum;
+        uint256 cumulativeTotalPaid;
+        GasbackSplitter fuzzSplitter;
+    }
+
+    address[] public payees = new address[](3);
+    uint256[] public shares = new uint256[](3);
+
+    uint256 private _payee1Key = 2;
+    uint256 private _payee2Key = 3;
+    uint256 private _payee3Key = 4;
+
+    address private payee1 = vm.addr(_payee1Key);
+    address private payee2 = vm.addr(_payee2Key);
+    address private payee3 = vm.addr(_payee3Key);
+
+    uint256 public shares1 = 48;
+    uint256 public shares2 = 42;
+    uint256 public shares3 = 10;
+
+    function setUp() public {
+        payees[0] = payee1;
+        payees[1] = payee2;
+        payees[2] = payee3;
+
+        shares[0] = shares1;
+        shares[1] = shares2;
+        shares[2] = shares3;
+    }
+
+    function _deployDefaultSplitter() internal returns (GasbackSplitter) {
+        return new GasbackSplitter(payees, shares);
+    }
+
+    function _addressSendValueRevertReason() internal pure returns (bytes memory) {
+        return abi.encodeWithSignature(
+            "Error(string)", "Address: unable to send value, recipient may have reverted"
+        );
+    }
+
+    function _createFuzzTestState(uint8 numPayees, uint256 addrOffset)
+        internal
+        returns (FuzzTestState memory state)
+    {
+        state.fuzzPayees = new address[](numPayees);
+        state.fuzzShares = new uint256[](numPayees);
+        state.initialBalances = new uint256[](numPayees);
+
+        for (uint256 i = 0; i < numPayees; i++) {
+            state.fuzzPayees[i] = vm.addr(i + addrOffset);
+            state.fuzzShares[i] = (i % 100) + 1;
+            state.totalSharesSum += state.fuzzShares[i];
+        }
+
+        state.fuzzSplitter = new GasbackSplitter(state.fuzzPayees, state.fuzzShares);
+
+        for (uint256 i = 0; i < numPayees; i++) {
+            state.initialBalances[i] = state.fuzzPayees[i].balance;
+        }
+    }
+
+    function _sendPaymentAndUpdateState(FuzzTestState memory state, uint256 paymentAmount)
+        internal
+    {
+        state.cumulativeTotalPaid += paymentAmount;
+        vm.deal(address(this), paymentAmount);
+        (bool success,) = address(state.fuzzSplitter).call{value: paymentAmount}("");
+        assertTrue(success);
+    }
+
+    function _verifyPayeeBalances(FuzzTestState memory state, uint8 numPayees) internal view {
+        for (uint256 i = 0; i < numPayees; i++) {
+            uint256 actualReceived = state.fuzzPayees[i].balance - state.initialBalances[i];
+            uint256 expectedReceived =
+                (state.cumulativeTotalPaid * state.fuzzShares[i]) / state.totalSharesSum;
+            assertEq(actualReceived, expectedReceived);
+        }
+    }
+
+    function test_read_public_variables() public {
+        splitter = _deployDefaultSplitter();
+
+        assertEq(splitter.totalShares(), 100);
+        assertEq(splitter.totalReleased(), 0);
+        assertEq(splitter.shares(payee1), shares1);
+        assertEq(splitter.shares(payee2), shares2);
+        assertEq(splitter.shares(payee3), shares3);
+        assertEq(splitter.released(payee1), 0);
+        assertEq(splitter.released(payee2), 0);
+        assertEq(splitter.released(payee3), 0);
+        assertEq(splitter.payee(0), payee1);
+        assertEq(splitter.payee(1), payee2);
+        assertEq(splitter.payee(2), payee3);
+        assertEq(splitter.externalPayees(0), payee1);
+        assertEq(splitter.externalPayees(1), payee2);
+        assertEq(splitter.externalPayees(2), payee3);
+    }
+
+    function test_balances_after_payment() public {
+        splitter = _deployDefaultSplitter();
+
+        uint256 paymentAmount = 10 ether;
+
+        uint256 balanceBefore1 = payee1.balance;
+        uint256 balanceBefore2 = payee2.balance;
+        uint256 balanceBefore3 = payee3.balance;
+
+        vm.deal(address(this), paymentAmount);
+        (bool success,) = address(splitter).call{value: paymentAmount}("");
+        assertTrue(success, "Payment to splitter failed");
+
+        uint256 balanceAfter1 = payee1.balance;
+        uint256 balanceAfter2 = payee2.balance;
+        uint256 balanceAfter3 = payee3.balance;
+
+        uint256 totalShares = splitter.totalShares();
+        uint256 expectedPayment1 = (paymentAmount * shares1) / totalShares;
+        uint256 expectedPayment2 = (paymentAmount * shares2) / totalShares;
+        uint256 expectedPayment3 = (paymentAmount * shares3) / totalShares;
+
+        assertEq(
+            balanceAfter1 - balanceBefore1, expectedPayment1, "Payee1 received incorrect amount"
+        );
+        assertEq(
+            balanceAfter2 - balanceBefore2, expectedPayment2, "Payee2 received incorrect amount"
+        );
+        assertEq(
+            balanceAfter3 - balanceBefore3, expectedPayment3, "Payee3 received incorrect amount"
+        );
+
+        assertEq(balanceAfter1 - balanceBefore1, 4.8 ether, "Payee1 should receive 4.8 ether");
+        assertEq(balanceAfter2 - balanceBefore2, 4.2 ether, "Payee2 should receive 4.2 ether");
+        assertEq(balanceAfter3 - balanceBefore3, 1 ether, "Payee3 should receive 1 ether");
+        assertEq(address(splitter).balance, 0);
+    }
+
+    function test_receive_emits_payment_received() public {
+        splitter = _deployDefaultSplitter();
+
+        uint256 paymentAmount = 10 ether;
+
+        vm.deal(address(this), paymentAmount);
+        vm.expectEmit(true, true, true, true, address(splitter));
+        emit PaymentReleased(payee1, 4.8 ether);
+        vm.expectEmit(true, true, true, true, address(splitter));
+        emit PaymentReleased(payee2, 4.2 ether);
+        vm.expectEmit(true, true, true, true, address(splitter));
+        emit PaymentReleased(payee3, 1 ether);
+        vm.expectEmit(true, true, true, true, address(splitter));
+        emit PaymentReceived(address(this), paymentAmount);
+
+        (bool success,) = address(splitter).call{value: paymentAmount}("");
+        assertTrue(success, "Payment to splitter failed");
+    }
+
+    function test_receive_allows_small_payment() public {
+        splitter = _deployDefaultSplitter();
+
+        uint256 paymentAmount = 1 wei;
+
+        uint256 balanceBefore1 = payee1.balance;
+        uint256 balanceBefore2 = payee2.balance;
+        uint256 balanceBefore3 = payee3.balance;
+
+        vm.deal(address(this), paymentAmount);
+        (bool success,) = address(splitter).call{value: paymentAmount}("");
+        assertTrue(success, "Payment to splitter failed");
+
+        assertEq(payee1.balance, balanceBefore1);
+        assertEq(payee2.balance, balanceBefore2);
+        assertEq(payee3.balance, balanceBefore3);
+        assertEq(address(splitter).balance, paymentAmount);
+    }
+
+    function test_receive_skips_failed_payee_emits_failure() public {
+        RejectingGasbackSplitterPayee rejecter = new RejectingGasbackSplitterPayee();
+
+        address[] memory localPayees = new address[](2);
+        localPayees[0] = address(rejecter);
+        localPayees[1] = payee1;
+
+        uint256[] memory localShares = new uint256[](2);
+        localShares[0] = 50;
+        localShares[1] = 50;
+
+        GasbackSplitter localSplitter = new GasbackSplitter(localPayees, localShares);
+
+        uint256 paymentAmount = 1 ether;
+        uint256 payee1Before = payee1.balance;
+
+        vm.deal(address(this), paymentAmount);
+        vm.expectEmit(true, true, true, true, address(localSplitter));
+        emit PaymentFailed(address(rejecter), 0.5 ether, _addressSendValueRevertReason());
+
+        (bool success,) = address(localSplitter).call{value: paymentAmount}("");
+        assertTrue(success, "Payment to splitter failed");
+
+        assertEq(payee1.balance - payee1Before, 0.5 ether);
+        assertEq(address(localSplitter).balance, 0.5 ether);
+        assertEq(localSplitter.releasable(address(rejecter)), 0.5 ether);
+    }
+
+    function test_receive_reverts_on_reentrant_payee() public {
+        ReentrantGasbackSplitterPayee reentrant = new ReentrantGasbackSplitterPayee();
+
+        address[] memory localPayees = new address[](2);
+        localPayees[0] = address(reentrant);
+        localPayees[1] = payee1;
+
+        uint256[] memory localShares = new uint256[](2);
+        localShares[0] = 1;
+        localShares[1] = 1;
+
+        GasbackSplitter localSplitter = new GasbackSplitter(localPayees, localShares);
+        reentrant.setSplitter(localSplitter);
+
+        uint256 paymentAmount = 1 ether;
+        uint256 payee1Before = payee1.balance;
+
+        vm.deal(address(this), paymentAmount);
+        vm.expectEmit(true, true, true, true, address(localSplitter));
+        emit PaymentFailed(address(reentrant), 0.5 ether, _addressSendValueRevertReason());
+
+        (bool success,) = address(localSplitter).call{value: paymentAmount}("");
+        assertTrue(success, "Payment to splitter failed");
+
+        assertEq(address(reentrant).balance, 0);
+        assertEq(payee1.balance - payee1Before, 0.5 ether);
+        assertEq(localSplitter.released(address(reentrant)), 0);
+        assertEq(localSplitter.released(payee1), 0.5 ether);
+        assertEq(localSplitter.totalReleased(), 0.5 ether);
+        assertEq(address(localSplitter).balance, 0.5 ether);
+        assertEq(localSplitter.releasable(address(reentrant)), 0.5 ether);
+    }
+
+    function test_release_after_dust_payment() public {
+        splitter = _deployDefaultSplitter();
+
+        vm.deal(address(this), 1 wei);
+        (bool success,) = address(splitter).call{value: 1 wei}("");
+        assertTrue(success, "Payment to splitter failed");
+
+        uint256 payee1Before = payee1.balance;
+        vm.deal(address(splitter), 3 wei);
+
+        splitter.release(payable(payee1));
+
+        assertEq(payee1.balance - payee1Before, 1 wei);
+        assertEq(splitter.released(payee1), 1 wei);
+        assertEq(address(splitter).balance, 2 wei);
+    }
+
+    function test_failed_payee_accounting_invariants() public {
+        RejectingGasbackSplitterPayee rejecter = new RejectingGasbackSplitterPayee();
+
+        address[] memory localPayees = new address[](2);
+        localPayees[0] = address(rejecter);
+        localPayees[1] = payee1;
+
+        uint256[] memory localShares = new uint256[](2);
+        localShares[0] = 50;
+        localShares[1] = 50;
+
+        GasbackSplitter localSplitter = new GasbackSplitter(localPayees, localShares);
+
+        uint256 paymentAmount = 1 ether;
+        uint256 payee1Before = payee1.balance;
+
+        vm.deal(address(this), paymentAmount);
+        (bool success,) = address(localSplitter).call{value: paymentAmount}("");
+        assertTrue(success, "Payment to splitter failed");
+
+        assertEq(payee1.balance - payee1Before, 0.5 ether);
+        assertEq(localSplitter.released(payee1), 0.5 ether);
+        assertEq(localSplitter.released(address(rejecter)), 0);
+        assertEq(localSplitter.totalReleased(), 0.5 ether);
+        assertEq(address(localSplitter).balance, 0.5 ether);
+        assertEq(localSplitter.releasable(address(rejecter)), 0.5 ether);
+        assertEq(localSplitter.releasable(payee1), 0);
+    }
+
+    function test_multiple_payments_accounting_is_cumulative() public {
+        splitter = _deployDefaultSplitter();
+
+        uint256 balanceBefore1 = payee1.balance;
+        uint256 balanceBefore2 = payee2.balance;
+        uint256 balanceBefore3 = payee3.balance;
+
+        vm.deal(address(this), 1 ether);
+        (bool success1,) = address(splitter).call{value: 1 ether}("");
+        assertTrue(success1, "First payment to splitter failed");
+
+        vm.deal(address(this), 2 ether);
+        (bool success2,) = address(splitter).call{value: 2 ether}("");
+        assertTrue(success2, "Second payment to splitter failed");
+
+        uint256 cumulativePayment = 3 ether;
+        uint256 totalShares = splitter.totalShares();
+        uint256 expectedPayment1 = (cumulativePayment * shares1) / totalShares;
+        uint256 expectedPayment2 = (cumulativePayment * shares2) / totalShares;
+        uint256 expectedPayment3 = (cumulativePayment * shares3) / totalShares;
+
+        assertEq(payee1.balance - balanceBefore1, expectedPayment1);
+        assertEq(payee2.balance - balanceBefore2, expectedPayment2);
+        assertEq(payee3.balance - balanceBefore3, expectedPayment3);
+        assertEq(splitter.released(payee1), expectedPayment1);
+        assertEq(splitter.released(payee2), expectedPayment2);
+        assertEq(splitter.released(payee3), expectedPayment3);
+        assertEq(splitter.totalReleased(), cumulativePayment);
+        assertEq(address(splitter).balance, 0);
+    }
+
+    function test_revert_deploy_empty_payees() public {
+        address[] memory emptyPayees = new address[](0);
+        uint256[] memory emptyShares = new uint256[](0);
+
+        vm.expectRevert("PaymentSplitter: no payees");
+        new GasbackSplitter(emptyPayees, emptyShares);
+    }
+
+    function test_revert_deploy_length_mismatch_more_payees() public {
+        address[] memory morePayees = new address[](3);
+        morePayees[0] = payee1;
+        morePayees[1] = payee2;
+        morePayees[2] = payee3;
+
+        uint256[] memory fewerShares = new uint256[](2);
+        fewerShares[0] = 50;
+        fewerShares[1] = 50;
+
+        vm.expectRevert("PaymentSplitter: payees and shares length mismatch");
+        new GasbackSplitter(morePayees, fewerShares);
+    }
+
+    function test_revert_deploy_length_mismatch_more_shares() public {
+        address[] memory fewerPayees = new address[](2);
+        fewerPayees[0] = payee1;
+        fewerPayees[1] = payee2;
+
+        uint256[] memory moreShares = new uint256[](3);
+        moreShares[0] = 40;
+        moreShares[1] = 40;
+        moreShares[2] = 20;
+
+        vm.expectRevert("PaymentSplitter: payees and shares length mismatch");
+        new GasbackSplitter(fewerPayees, moreShares);
+    }
+
+    function test_revert_deploy_zero_address_payee() public {
+        address[] memory badPayees = new address[](2);
+        badPayees[0] = payee1;
+        badPayees[1] = address(0);
+
+        uint256[] memory validShares = new uint256[](2);
+        validShares[0] = 50;
+        validShares[1] = 50;
+
+        vm.expectRevert("PaymentSplitter: account is the zero address");
+        new GasbackSplitter(badPayees, validShares);
+    }
+
+    function test_revert_deploy_zero_shares() public {
+        address[] memory validPayees = new address[](2);
+        validPayees[0] = payee1;
+        validPayees[1] = payee2;
+
+        uint256[] memory badShares = new uint256[](2);
+        badShares[0] = 100;
+        badShares[1] = 0;
+
+        vm.expectRevert("PaymentSplitter: shares are 0");
+        new GasbackSplitter(validPayees, badShares);
+    }
+
+    function test_revert_deploy_duplicate_payee() public {
+        address[] memory duplicatePayees = new address[](3);
+        duplicatePayees[0] = payee1;
+        duplicatePayees[1] = payee2;
+        duplicatePayees[2] = payee1;
+
+        uint256[] memory validShares = new uint256[](3);
+        validShares[0] = 40;
+        validShares[1] = 40;
+        validShares[2] = 20;
+
+        vm.expectRevert("PaymentSplitter: account already has shares");
+        new GasbackSplitter(duplicatePayees, validShares);
+    }
+
+    function test_revert_release_account_has_no_shares() public {
+        splitter = _deployDefaultSplitter();
+
+        address nonPayee = vm.addr(999);
+
+        vm.expectRevert("PaymentSplitter: account has no shares");
+        splitter.release(payable(nonPayee));
+    }
+
+    function test_revert_release_account_not_due_payment() public {
+        splitter = _deployDefaultSplitter();
+
+        vm.expectRevert("PaymentSplitter: account is not due payment");
+        splitter.release(payable(payee1));
+    }
+
+    function test_revert_release_failed_to_send_value() public {
+        RejectingGasbackSplitterPayee rejecter = new RejectingGasbackSplitterPayee();
+
+        address[] memory rejectorPayees = new address[](1);
+        rejectorPayees[0] = address(rejecter);
+
+        uint256[] memory rejectorShares = new uint256[](1);
+        rejectorShares[0] = 100;
+
+        GasbackSplitter rejectorSplitter = new GasbackSplitter(rejectorPayees, rejectorShares);
+
+        vm.deal(address(rejectorSplitter), 1 ether);
+
+        vm.expectRevert("Address: unable to send value, recipient may have reverted");
+        rejectorSplitter.release(payable(address(rejecter)));
+    }
+
+    function testFuzz_balances_after_payment(uint8 numPayees, uint256 paymentAmount) public {
+        numPayees = uint8(bound(numPayees, 1, 50));
+        paymentAmount = bound(paymentAmount, 1 ether, 1000 ether);
+
+        FuzzTestState memory state = _createFuzzTestState(numPayees, 100);
+
+        _sendPaymentAndUpdateState(state, paymentAmount);
+        _verifyPayeeBalances(state, numPayees);
+
+        assertLe(address(state.fuzzSplitter).balance, uint256(numPayees));
+    }
+
+    function testFuzz_balances_after_multiple_payments(
+        uint8 numPayees,
+        uint256[9] memory paymentAmounts
+    ) public {
+        numPayees = uint8(bound(numPayees, 1, 50));
+
+        FuzzTestState memory state = _createFuzzTestState(numPayees, 200);
+
+        for (uint256 p = 0; p < 9; p++) {
+            uint256 paymentAmount = bound(paymentAmounts[p], 0.1 ether, 10 ether);
+            _sendPaymentAndUpdateState(state, paymentAmount);
+            _verifyPayeeBalances(state, numPayees);
+        }
+
+        assertLe(address(state.fuzzSplitter).balance, uint256(numPayees) * 9);
+    }
+}
