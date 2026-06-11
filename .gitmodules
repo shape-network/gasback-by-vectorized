@@ -4,6 +4,3 @@
 [submodule "lib/solady"]
 	path = lib/solady
 	url = https://github.com/vectorized/solady
-[submodule "lib/splits-contracts-monorepo"]
-	path = lib/splits-contracts-monorepo
-	url = https://github.com/0xSplits/splits-contracts-monorepo
