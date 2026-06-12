@@ -54,6 +54,14 @@ contract FeeVaultSplitter is PaymentSplitter, ReentrancyGuard {
     }
 
     /**
+     * @dev Attempts to release payments for a slice of payees, skipping zero-due payees and emitting failures instead of
+     * reverting on send failures.
+     */
+    function distribute(uint256 start, uint256 end) public {
+        _distribute(start, end);
+    }
+
+    /**
      * @dev Attempt to pay a slice of payees without reverting the whole call.
      * Skips zero-due accounts and emits failures for accounts that revert on receive.
      */
