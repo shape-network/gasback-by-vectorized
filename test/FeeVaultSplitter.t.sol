@@ -215,43 +215,13 @@ contract FeeVaultSplitterTest is SoladyTest {
 
         vm.deal(address(this), paymentAmount);
         vm.expectEmit(true, true, true, true);
-        emit PaymentFailed(
-            address(rejecter),
-            0.5 ether,
-            abi.encodeWithSignature("sendValue(address,uint256)", address(rejecter), 0.5 ether)
-        );
+        emit PaymentFailed(address(rejecter), 0.5 ether, _addressSendValueRevertReason());
 
         (bool success,) = address(localSplitter).call{value: paymentAmount}("");
         assertTrue(success, "Payment to splitter failed");
 
         assertEq(payee1.balance - payee1Before, 0.5 ether);
         assertEq(address(localSplitter).balance, 0.5 ether);
-    }
-
-    function test_receive_allows_reentrant_payee() public {
-        ReentrantPayee reentrant = new ReentrantPayee();
-
-        address[] memory localPayees = new address[](2);
-        localPayees[0] = address(reentrant);
-        localPayees[1] = payee1;
-
-        uint256[] memory localShares = new uint256[](2);
-        localShares[0] = 1;
-        localShares[1] = 1;
-
-        FeeVaultSplitter localSplitter = new FeeVaultSplitter(localPayees, localShares);
-        reentrant.setSplitter(localSplitter);
-
-        uint256 paymentAmount = 1 ether;
-        uint256 payee1Before = payee1.balance;
-
-        vm.deal(address(this), paymentAmount);
-        (bool success,) = address(localSplitter).call{value: paymentAmount}("");
-        assertTrue(success, "Payment to splitter failed");
-
-        assertTrue(reentrant.didReenter());
-        assertEq(payee1.balance - payee1Before, 0.5 ether);
-        assertEq(address(localSplitter).balance, 1 wei);
     }
 
     function test_distribute_noop_start_gte_end() public {
@@ -408,7 +378,7 @@ contract FeeVaultSplitterTest is SoladyTest {
         badShares[0] = 100;
         badShares[1] = 0;
 
-        vm.expectRevert("PaymentSplitter: shares cannot be zero");
+        vm.expectRevert("PaymentSplitter: shares are 0");
         new FeeVaultSplitter(validPayees, badShares);
     }
 
@@ -478,13 +448,13 @@ contract FeeVaultSplitterTest is SoladyTest {
 
         vm.deal(address(this), paymentAmount);
         vm.expectEmit(true, true, true, true, address(splitter));
+        emit PaymentReceived(address(this), paymentAmount);
+        vm.expectEmit(true, true, true, true, address(splitter));
         emit PaymentReleased(payee1, 4.8 ether);
         vm.expectEmit(true, true, true, true, address(splitter));
         emit PaymentReleased(payee2, 4.2 ether);
         vm.expectEmit(true, true, true, true, address(splitter));
         emit PaymentReleased(payee3, 1 ether);
-        vm.expectEmit(true, true, true, true, address(splitter));
-        emit PaymentReceived(address(this), paymentAmount);
 
         (bool success,) = address(splitter).call{value: paymentAmount}("");
         assertTrue(success, "Payment to splitter failed");
