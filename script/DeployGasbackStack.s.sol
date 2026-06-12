@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {Gasback} from "../src/Gasback.sol";
-import {ShapePaymentSplitter} from "../src/standard-interactions/ShapePaymentSplitter.sol";
+import {FeeVaultSplitter} from "../src/FeeVaultSplitter.sol";
 import {GasbackTestCaller} from "../src/test/GasbackTestCaller.sol";
 
 contract DeployGasbackStackScript is Script {
@@ -14,7 +14,7 @@ contract DeployGasbackStackScript is Script {
 
     function run()
         external
-        returns (Gasback gasback, ShapePaymentSplitter splitter, GasbackTestCaller caller)
+        returns (Gasback gasback, FeeVaultSplitter splitter, GasbackTestCaller caller)
     {
         uint256 privateKey = uint256(vm.envBytes32("PRIVATE_KEY"));
         uint256 gasbackShare = vm.envOr("GASBACK_SPLITTER_SHARE", uint256(1));
@@ -52,13 +52,13 @@ contract DeployGasbackStackScript is Script {
             shares[i + 1] = extraShares[i];
         }
 
-        splitter = new ShapePaymentSplitter(payees, shares);
+        splitter = new FeeVaultSplitter(payees, shares);
         caller = new GasbackTestCaller(address(gasback));
 
         vm.stopBroadcast();
 
         console2.log("Gasback:", address(gasback));
-        console2.log("ShapePaymentSplitter:", address(splitter));
+        console2.log("FeeVaultSplitter:", address(splitter));
         console2.log("GasbackTestCaller:", address(caller));
     }
 }

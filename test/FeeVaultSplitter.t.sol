@@ -2,18 +2,18 @@
 pragma solidity ^0.8.4;
 
 import "./utils/SoladyTest.sol";
-import {GasbackSplitter} from "../src/GasbackSplitter.sol";
+import {FeeVaultSplitter} from "../src/FeeVaultSplitter.sol";
 
-contract RejectingGasbackSplitterPayee {
+contract RejectingFeeVaultSplitterPayee {
     receive() external payable {
         revert("I reject ETH");
     }
 }
 
-contract ReentrantGasbackSplitterPayee {
-    GasbackSplitter public splitter;
+contract ReentrantFeeVaultSplitterPayee {
+    FeeVaultSplitter public splitter;
 
-    function setSplitter(GasbackSplitter splitter_) external {
+    function setSplitter(FeeVaultSplitter splitter_) external {
         splitter = splitter_;
     }
 
@@ -23,12 +23,12 @@ contract ReentrantGasbackSplitterPayee {
     }
 }
 
-contract GasbackSplitterTest is SoladyTest {
+contract FeeVaultSplitterTest is SoladyTest {
     event PaymentFailed(address to, uint256 amount, bytes reason);
     event PaymentReceived(address from, uint256 amount);
     event PaymentReleased(address to, uint256 amount);
 
-    GasbackSplitter public splitter;
+    FeeVaultSplitter public splitter;
 
     struct FuzzTestState {
         address[] fuzzPayees;
@@ -36,7 +36,7 @@ contract GasbackSplitterTest is SoladyTest {
         uint256[] initialBalances;
         uint256 totalSharesSum;
         uint256 cumulativeTotalPaid;
-        GasbackSplitter fuzzSplitter;
+        FeeVaultSplitter fuzzSplitter;
     }
 
     address[] public payees = new address[](3);
@@ -64,8 +64,8 @@ contract GasbackSplitterTest is SoladyTest {
         shares[2] = shares3;
     }
 
-    function _deployDefaultSplitter() internal returns (GasbackSplitter) {
-        return new GasbackSplitter(payees, shares);
+    function _deployDefaultSplitter() internal returns (FeeVaultSplitter) {
+        return new FeeVaultSplitter(payees, shares);
     }
 
     function _addressSendValueRevertReason() internal pure returns (bytes memory) {
@@ -88,7 +88,7 @@ contract GasbackSplitterTest is SoladyTest {
             state.totalSharesSum += state.fuzzShares[i];
         }
 
-        state.fuzzSplitter = new GasbackSplitter(state.fuzzPayees, state.fuzzShares);
+        state.fuzzSplitter = new FeeVaultSplitter(state.fuzzPayees, state.fuzzShares);
 
         for (uint256 i = 0; i < numPayees; i++) {
             state.initialBalances[i] = state.fuzzPayees[i].balance;
@@ -209,7 +209,7 @@ contract GasbackSplitterTest is SoladyTest {
     }
 
     function test_receive_skips_failed_payee_emits_failure() public {
-        RejectingGasbackSplitterPayee rejecter = new RejectingGasbackSplitterPayee();
+        RejectingFeeVaultSplitterPayee rejecter = new RejectingFeeVaultSplitterPayee();
 
         address[] memory localPayees = new address[](2);
         localPayees[0] = address(rejecter);
@@ -219,7 +219,7 @@ contract GasbackSplitterTest is SoladyTest {
         localShares[0] = 50;
         localShares[1] = 50;
 
-        GasbackSplitter localSplitter = new GasbackSplitter(localPayees, localShares);
+        FeeVaultSplitter localSplitter = new FeeVaultSplitter(localPayees, localShares);
 
         uint256 paymentAmount = 1 ether;
         uint256 payee1Before = payee1.balance;
@@ -237,7 +237,7 @@ contract GasbackSplitterTest is SoladyTest {
     }
 
     function test_receive_reverts_on_reentrant_payee() public {
-        ReentrantGasbackSplitterPayee reentrant = new ReentrantGasbackSplitterPayee();
+        ReentrantFeeVaultSplitterPayee reentrant = new ReentrantFeeVaultSplitterPayee();
 
         address[] memory localPayees = new address[](2);
         localPayees[0] = address(reentrant);
@@ -247,7 +247,7 @@ contract GasbackSplitterTest is SoladyTest {
         localShares[0] = 1;
         localShares[1] = 1;
 
-        GasbackSplitter localSplitter = new GasbackSplitter(localPayees, localShares);
+        FeeVaultSplitter localSplitter = new FeeVaultSplitter(localPayees, localShares);
         reentrant.setSplitter(localSplitter);
 
         uint256 paymentAmount = 1 ether;
@@ -287,7 +287,7 @@ contract GasbackSplitterTest is SoladyTest {
     }
 
     function test_failed_payee_accounting_invariants() public {
-        RejectingGasbackSplitterPayee rejecter = new RejectingGasbackSplitterPayee();
+        RejectingFeeVaultSplitterPayee rejecter = new RejectingFeeVaultSplitterPayee();
 
         address[] memory localPayees = new address[](2);
         localPayees[0] = address(rejecter);
@@ -297,7 +297,7 @@ contract GasbackSplitterTest is SoladyTest {
         localShares[0] = 50;
         localShares[1] = 50;
 
-        GasbackSplitter localSplitter = new GasbackSplitter(localPayees, localShares);
+        FeeVaultSplitter localSplitter = new FeeVaultSplitter(localPayees, localShares);
 
         uint256 paymentAmount = 1 ether;
         uint256 payee1Before = payee1.balance;
@@ -351,7 +351,7 @@ contract GasbackSplitterTest is SoladyTest {
         uint256[] memory emptyShares = new uint256[](0);
 
         vm.expectRevert("PaymentSplitter: no payees");
-        new GasbackSplitter(emptyPayees, emptyShares);
+        new FeeVaultSplitter(emptyPayees, emptyShares);
     }
 
     function test_revert_deploy_length_mismatch_more_payees() public {
@@ -365,7 +365,7 @@ contract GasbackSplitterTest is SoladyTest {
         fewerShares[1] = 50;
 
         vm.expectRevert("PaymentSplitter: payees and shares length mismatch");
-        new GasbackSplitter(morePayees, fewerShares);
+        new FeeVaultSplitter(morePayees, fewerShares);
     }
 
     function test_revert_deploy_length_mismatch_more_shares() public {
@@ -379,7 +379,7 @@ contract GasbackSplitterTest is SoladyTest {
         moreShares[2] = 20;
 
         vm.expectRevert("PaymentSplitter: payees and shares length mismatch");
-        new GasbackSplitter(fewerPayees, moreShares);
+        new FeeVaultSplitter(fewerPayees, moreShares);
     }
 
     function test_revert_deploy_zero_address_payee() public {
@@ -392,7 +392,7 @@ contract GasbackSplitterTest is SoladyTest {
         validShares[1] = 50;
 
         vm.expectRevert("PaymentSplitter: account is the zero address");
-        new GasbackSplitter(badPayees, validShares);
+        new FeeVaultSplitter(badPayees, validShares);
     }
 
     function test_revert_deploy_zero_shares() public {
@@ -405,7 +405,7 @@ contract GasbackSplitterTest is SoladyTest {
         badShares[1] = 0;
 
         vm.expectRevert("PaymentSplitter: shares are 0");
-        new GasbackSplitter(validPayees, badShares);
+        new FeeVaultSplitter(validPayees, badShares);
     }
 
     function test_revert_deploy_duplicate_payee() public {
@@ -420,7 +420,7 @@ contract GasbackSplitterTest is SoladyTest {
         validShares[2] = 20;
 
         vm.expectRevert("PaymentSplitter: account already has shares");
-        new GasbackSplitter(duplicatePayees, validShares);
+        new FeeVaultSplitter(duplicatePayees, validShares);
     }
 
     function test_revert_release_account_has_no_shares() public {
@@ -440,7 +440,7 @@ contract GasbackSplitterTest is SoladyTest {
     }
 
     function test_revert_release_failed_to_send_value() public {
-        RejectingGasbackSplitterPayee rejecter = new RejectingGasbackSplitterPayee();
+        RejectingFeeVaultSplitterPayee rejecter = new RejectingFeeVaultSplitterPayee();
 
         address[] memory rejectorPayees = new address[](1);
         rejectorPayees[0] = address(rejecter);
@@ -448,7 +448,7 @@ contract GasbackSplitterTest is SoladyTest {
         uint256[] memory rejectorShares = new uint256[](1);
         rejectorShares[0] = 100;
 
-        GasbackSplitter rejectorSplitter = new GasbackSplitter(rejectorPayees, rejectorShares);
+        FeeVaultSplitter rejectorSplitter = new FeeVaultSplitter(rejectorPayees, rejectorShares);
 
         vm.deal(address(rejectorSplitter), 1 ether);
 

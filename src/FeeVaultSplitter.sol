@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {PaymentSplitter} from "@openzeppelin-contracts/finance/PaymentSplitter.sol";
-import {ReentrancyGuard} from "@openzeppelin-contracts/security/ReentrancyGuard.sol";
+import {PaymentSplitter} from "@openzeppelin/contracts/finance/PaymentSplitter.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 /**
- * @title GasbackSplitter
+ * @title FeeVaultSplitter
  * @dev This contract, forked from OpenZeppelin's PaymentSplitter, allows for splitting Ether payments among a group of accounts.
  * It has been modified by Shape to remove ERC20 interactions, focusing solely on Ether distribution.
  *
@@ -13,17 +13,17 @@ import {ReentrancyGuard} from "@openzeppelin-contracts/security/ReentrancyGuard.
  * Each account can claim an amount proportional to their percentage of total shares. The share distribution is set at
  * contract deployment and cannot be updated thereafter.
  *
- * GasbackSplitter follows a _push payment_ model. Incoming Ether triggers an attempt to release funds to all payees.
+ * FeeVaultSplitter follows a _push payment_ model. Incoming Ether triggers an attempt to release funds to all payees.
  *
  * The sender of Ether to this contract does not need to be aware of the split mechanism, as it is handled transparently.
  */
-contract GasbackSplitter is PaymentSplitter, ReentrancyGuard {
+contract FeeVaultSplitter is PaymentSplitter, ReentrancyGuard {
     event PaymentFailed(address to, uint256 amount, bytes reason);
 
     address[] public externalPayees;
 
     /**
-     * @dev Creates an instance of `GasbackSplitter` where each account in `payees` is assigned the number of shares at
+     * @dev Creates an instance of `FeeVaultSplitter` where each account in `payees` is assigned the number of shares at
      * the matching position in the `shares` array.
      *
      * All addresses in `payees` must be non-zero. Both arrays must have the same non-zero length, and there must be no
@@ -48,8 +48,9 @@ contract GasbackSplitter is PaymentSplitter, ReentrancyGuard {
      * functions].
      */
     receive() external payable override(PaymentSplitter) nonReentrant {
+        emit PaymentReceived(_msgSender(), msg.value);
+
         _distribute(0, externalPayees.length);
-        emit PaymentReceived(msg.sender, msg.value);
     }
 
     /**

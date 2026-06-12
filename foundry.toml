@@ -16,7 +16,7 @@ remappings = [
   "murky=lib/murky",
   "dn404/=lib/dn404/src",
   "solady=lib/solady/src",
-  "@openzeppelin-contracts/=dependencies/@openzeppelin-contracts-4.9.5/"
+  "@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-4.9.5/"
 ]
 
 [fmt]
