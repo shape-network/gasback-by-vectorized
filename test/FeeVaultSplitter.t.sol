@@ -127,8 +127,6 @@ contract FeeVaultSplitterTest is SoladyTest {
     }
 
     function test_read_public_variables() public {
-        splitter = _deployDefaultSplitter();
-
         assertEq(splitter.externalPayees(0), payee1);
         assertEq(splitter.externalPayees(1), payee2);
         assertEq(splitter.externalPayees(2), payee3);
@@ -200,8 +198,6 @@ contract FeeVaultSplitterTest is SoladyTest {
     }
 
     function test_receive_skips_failed_payee_emits_failure() public {
-        splitter = _deployDefaultSplitter();
-
         RejectingPayee rejecter = new RejectingPayee();
 
         address[] memory localPayees = new address[](2);
@@ -233,8 +229,6 @@ contract FeeVaultSplitterTest is SoladyTest {
     }
 
     function test_receive_allows_reentrant_payee() public {
-        splitter = _deployDefaultSplitter();
-
         ReentrantPayee reentrant = new ReentrantPayee();
 
         address[] memory localPayees = new address[](2);
@@ -298,8 +292,6 @@ contract FeeVaultSplitterTest is SoladyTest {
     }
 
     function test_distribute_invariants_with_failed_payee() public {
-        splitter = _deployDefaultSplitter();
-
         RejectingPayee rejecter = new RejectingPayee();
 
         address[] memory localPayees = new address[](2);
@@ -408,8 +400,6 @@ contract FeeVaultSplitterTest is SoladyTest {
     }
 
     function test_revert_deploy_zero_shares() public {
-        splitter = _deployDefaultSplitter();
-
         address[] memory validPayees = new address[](2);
         validPayees[0] = payee1;
         validPayees[1] = payee2;
@@ -484,8 +474,6 @@ contract FeeVaultSplitterTest is SoladyTest {
     }
 
     function test_receive_emits_payment_received() public {
-        splitter = _deployDefaultSplitter();
-
         uint256 paymentAmount = 10 ether;
 
         vm.deal(address(this), paymentAmount);
@@ -536,8 +524,6 @@ contract FeeVaultSplitterTest is SoladyTest {
     }
 
     function test_release_after_dust_payment() public {
-        splitter = _deployDefaultSplitter();
-
         vm.deal(address(this), 1 wei);
         (bool success,) = address(splitter).call{value: 1 wei}("");
         assertTrue(success, "Payment to splitter failed");
@@ -582,8 +568,6 @@ contract FeeVaultSplitterTest is SoladyTest {
     }
 
     function test_multiple_payments_accounting_is_cumulative() public {
-        splitter = _deployDefaultSplitter();
-
         uint256 balanceBefore1 = payee1.balance;
         uint256 balanceBefore2 = payee2.balance;
         uint256 balanceBefore3 = payee3.balance;
