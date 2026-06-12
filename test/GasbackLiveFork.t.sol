@@ -15,7 +15,7 @@ interface IGasbackLiveFork {
     function setGasbackMaxBaseFee(uint256 value) external returns (bool);
 }
 
-interface IShapePaymentSplitterLiveFork {
+interface IFeeVaultSplitterLiveFork {
     function totalShares() external view returns (uint256);
     function shares(address account) external view returns (uint256);
     function releasable(address account) external view returns (uint256);
@@ -46,7 +46,7 @@ contract GasbackLiveForkTest is SoladyTest {
     uint256 internal constant DENOMINATOR = 1 ether;
 
     IGasbackLiveFork internal gasback;
-    IShapePaymentSplitterLiveFork internal splitter;
+    IFeeVaultSplitterLiveFork internal splitter;
 
     function setUp() public {
         if (!vm.envExists("SHAPE_SEPOLIA_RPC_URL")) {
@@ -56,7 +56,7 @@ contract GasbackLiveForkTest is SoladyTest {
 
         vm.createSelectFork(vm.envString("SHAPE_SEPOLIA_RPC_URL"));
         gasback = IGasbackLiveFork(GASBACK);
-        splitter = IShapePaymentSplitterLiveFork(SPLITTER);
+        splitter = IFeeVaultSplitterLiveFork(SPLITTER);
     }
 
     function test_liveDeploymentConfiguration() public view {
