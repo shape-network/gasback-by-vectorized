@@ -33,8 +33,9 @@ contract FeeVaultSplitter is PaymentSplitter, ReentrancyGuard {
         payable
         PaymentSplitter(payees_, shares_)
     {
+        externalPayees = new address[](payees_.length);
         for (uint256 i = 0; i < payees_.length; i++) {
-            externalPayees[i] = payees_[i];
+            externalPayees.push(payees_[i]);
         }
     }
 
