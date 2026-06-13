@@ -29,8 +29,6 @@ contract MockVaultForConsistency {
 }
 
 contract GasbackVaultShareConsistencyTest is SoladyTest {
-    error BaseFeeVaultShareInconsistent(uint256 provided, uint256 expected);
-
     address internal constant SYSTEM = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
 
     Gasback internal gasback;
@@ -60,9 +58,7 @@ contract GasbackVaultShareConsistencyTest is SoladyTest {
         _pointVaultAt(address(new MockSplitterForConsistency(100, 80)));
 
         vm.prank(SYSTEM);
-        vm.expectRevert(
-            abi.encodeWithSelector(BaseFeeVaultShareInconsistent.selector, 0.7 ether, 0.8 ether)
-        );
+        vm.expectRevert();
         gasback.setBaseFeeVaultShareNumerator(0.7 ether);
     }
 
@@ -78,11 +74,7 @@ contract GasbackVaultShareConsistencyTest is SoladyTest {
 
         _pointVaultAt(address(new MockSplitterForConsistency(3, 2)));
         vm.prank(SYSTEM);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                BaseFeeVaultShareInconsistent.selector, expected + 1, expected
-            )
-        );
+        vm.expectRevert();
         gasback.setBaseFeeVaultShareNumerator(expected + 1);
     }
 

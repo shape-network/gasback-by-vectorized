@@ -16,14 +16,6 @@ contract Gasback {
     uint256 public constant GASBACK_RATIO_DENOMINATOR = 1 ether;
 
     /*«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-*/
-    /*                           ERRORS                           */
-    /*-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»*/
-
-    /// @dev The base fee vault share numerator does not match this contract's live share in the
-    /// base fee vault's recipient splitter.
-    error BaseFeeVaultShareInconsistent(uint256 provided, uint256 expected);
-
-    /*«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-*/
     /*                          STORAGE                           */
     /*-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»*/
 
@@ -175,9 +167,7 @@ contract Gasback {
         require(value <= GASBACK_RATIO_DENOMINATOR);
         require(value >= $.gasbackRatioNumerator);
         (bool applicable, uint256 expected) = _expectedBaseFeeVaultShareNumerator();
-        if (applicable && value != expected) {
-            revert BaseFeeVaultShareInconsistent(value, expected);
-        }
+        require(!applicable || value == expected);
         $.baseFeeVaultShareNumerator = value;
         return true;
     }
