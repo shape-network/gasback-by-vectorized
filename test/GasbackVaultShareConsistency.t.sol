@@ -28,6 +28,53 @@ contract MockVaultForConsistency {
     }
 }
 
+/// @dev Splitter whose `totalShares()` reverts (drives the `!ok` arm of the line 204 early return).
+contract MockSplitterTotalSharesReverts {
+    function totalShares() external pure {
+        revert();
+    }
+
+    function shares(address) external pure returns (uint256) {
+        return 80;
+    }
+}
+
+/// @dev Splitter whose `totalShares()` returns fewer than 32 bytes (drives the `data.length != 32`
+/// arm of the line 204 early return).
+contract MockSplitterTotalSharesWrongLength {
+    function totalShares() external pure {
+        assembly {
+            return(0x00, 0x04)
+        }
+    }
+
+    function shares(address) external pure returns (uint256) {
+        return 80;
+    }
+}
+
+/// @dev Splitter with a readable, 32-byte `totalShares()` but whose `shares(address)` reverts
+/// (drives the `!ok` arm of the line 209 early return).
+contract MockSplitterSharesReverts {
+    uint256 public totalShares = 100;
+
+    function shares(address) external pure {
+        revert();
+    }
+}
+
+/// @dev Splitter with a readable `totalShares()` but whose `shares(address)` returns fewer than
+/// 32 bytes (drives the `data.length != 32` arm of the line 209 early return).
+contract MockSplitterSharesWrongLength {
+    uint256 public totalShares = 100;
+
+    function shares(address) external pure {
+        assembly {
+            return(0x00, 0x04)
+        }
+    }
+}
+
 contract GasbackVaultShareConsistencyTest is SoladyTest {
     address internal constant SYSTEM = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
 
@@ -97,6 +144,56 @@ contract GasbackVaultShareConsistencyTest is SoladyTest {
     function test_skipsWhenRecipientNotASplitter() public {
         // Recipient is a codeless address => shares()/totalShares() are unreadable.
         _pointVaultAt(address(0xBEEF));
+
+        vm.prank(SYSTEM);
+        assertTrue(gasback.setBaseFeeVaultShareNumerator(0.9 ether));
+        assertEq(gasback.baseFeeVaultShareNumerator(), 0.9 ether);
+    }
+
+    // Line 204: `totalShares()` staticcall fails => `!ok` => return (false, 0) => check skipped.
+    function test_skipsWhenTotalSharesReverts() public {
+        _pointVaultAt(address(new MockSplitterTotalSharesReverts()));
+
+        // 0.9 ether mismatches what shares(80) would imply, yet is accepted because the check is
+        // inapplicable (the splitter's totalShares() is unreadable).
+        vm.prank(SYSTEM);
+        assertTrue(gasback.setBaseFeeVaultShareNumerator(0.9 ether));
+        assertEq(gasback.baseFeeVaultShareNumerator(), 0.9 ether);
+    }
+
+    // Line 204: `totalShares()` returns non-32-byte data => `data.length != 32` => check skipped.
+    function test_skipsWhenTotalSharesWrongLength() public {
+        _pointVaultAt(address(new MockSplitterTotalSharesWrongLength()));
+
+        vm.prank(SYSTEM);
+        assertTrue(gasback.setBaseFeeVaultShareNumerator(0.9 ether));
+        assertEq(gasback.baseFeeVaultShareNumerator(), 0.9 ether);
+    }
+
+    // Line 206: `totalShares == 0` => return (false, 0) before the division => check skipped.
+    // (Were the check applicable, the expected-share computation would divide by zero.)
+    function test_skipsWhenTotalSharesZero() public {
+        _pointVaultAt(address(new MockSplitterForConsistency(0, 80)));
+
+        vm.prank(SYSTEM);
+        assertTrue(gasback.setBaseFeeVaultShareNumerator(0.9 ether));
+        assertEq(gasback.baseFeeVaultShareNumerator(), 0.9 ether);
+    }
+
+    // Line 209: `shares(address)` staticcall fails => `!ok` => return (false, 0) => check skipped.
+    function test_skipsWhenSharesReverts() public {
+        _pointVaultAt(address(new MockSplitterSharesReverts()));
+
+        // totalShares() reads as 100, but shares(this) is unreadable, so no expected share can be
+        // derived and 0.9 ether is accepted.
+        vm.prank(SYSTEM);
+        assertTrue(gasback.setBaseFeeVaultShareNumerator(0.9 ether));
+        assertEq(gasback.baseFeeVaultShareNumerator(), 0.9 ether);
+    }
+
+    // Line 209: `shares(address)` returns non-32-byte data => `data.length != 32` => check skipped.
+    function test_skipsWhenSharesWrongLength() public {
+        _pointVaultAt(address(new MockSplitterSharesWrongLength()));
 
         vm.prank(SYSTEM);
         assertTrue(gasback.setBaseFeeVaultShareNumerator(0.9 ether));
