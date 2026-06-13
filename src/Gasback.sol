@@ -33,7 +33,7 @@ contract Gasback {
         // The amount of ETH accrued by taking a cut from the gas burned (after the base fee vault share has been taken).
         uint256 accrued;
         // A mapping of addresses authorized to withdraw the accrued ETH.
-        mapping(address => bool) accuralWithdrawers;
+        mapping(address => bool) accrualWithdrawers;
         // The numerator for the share of the base fee vault.
         uint256 baseFeeVaultShareNumerator;
     }
@@ -85,7 +85,7 @@ contract Gasback {
     }
 
     /*«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-*/
-    /*                     ACCURAL FUNCTIONS                      */
+    /*                     ACCRUAL FUNCTIONS                      */
     /*-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»*/
 
     /// @dev Returns the amount of ETH accrued.
@@ -95,7 +95,7 @@ contract Gasback {
 
     /// @dev Withdraws from the accrued amount.
     function withdrawAccrued(address to, uint256 amount) public virtual returns (bool) {
-        require(_getGasbackStorage().accuralWithdrawers[msg.sender]);
+        require(_getGasbackStorage().accrualWithdrawers[msg.sender]);
         // Checked math prevents underflow.
         _getGasbackStorage().accrued -= amount;
         /// @solidity memory-safe-assembly
@@ -106,17 +106,17 @@ contract Gasback {
     }
 
     /// @dev Returns whether `addr` is authorized to call `withdrawAccrued`.
-    function isAuthorizedAccuralWithdrawer(address addr) public view virtual returns (bool) {
-        return _getGasbackStorage().accuralWithdrawers[addr];
+    function isAuthorizedAccrualWithdrawer(address addr) public view virtual returns (bool) {
+        return _getGasbackStorage().accrualWithdrawers[addr];
     }
 
     /// @dev Set whether `addr` is authorized to call `withdrawAccrued`.
-    function setAccuralWithdrawer(address addr, bool authorized)
+    function setAccrualWithdrawer(address addr, bool authorized)
         public
         onlySystemOrThis
         returns (bool)
     {
-        _getGasbackStorage().accuralWithdrawers[addr] = authorized;
+        _getGasbackStorage().accrualWithdrawers[addr] = authorized;
         return true;
     }
 

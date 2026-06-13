@@ -79,7 +79,7 @@ contract GasbackTest is SoladyTest {
         // With `accrued` and the contract balance both covering `amount`, only the
         // authorization check can fail.
         address unauthorized = address(0xBAD);
-        assertFalse(gasback.isAuthorizedAccuralWithdrawer(unauthorized));
+        assertFalse(gasback.isAuthorizedAccrualWithdrawer(unauthorized));
         vm.prank(unauthorized);
         vm.expectRevert();
         gasback.withdrawAccrued(address(0xCAFE), accruedAmount);

@@ -89,7 +89,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(gasback.baseFeeVaultShareNumerator(), 0.6 ether);
         assertEq(gasback.accrued(), 0);
         assertEq(gasback.GASBACK_RATIO_DENOMINATOR(), DENOMINATOR);
-        assertFalse(gasback.isAuthorizedAccuralWithdrawer(address(this)));
+        assertFalse(gasback.isAuthorizedAccrualWithdrawer(address(this)));
     }
 
     function test_receiveAcceptsEth() public {
@@ -118,7 +118,7 @@ contract GasbackExtendedTest is SoladyTest {
         vm.expectRevert();
         gasback.setBaseFeeVaultShareNumerator(1);
         vm.expectRevert();
-        gasback.setAccuralWithdrawer(address(1), true);
+        gasback.setAccrualWithdrawer(address(1), true);
         vm.expectRevert();
         gasback.withdraw(address(1), 1);
         vm.stopPrank();
@@ -132,7 +132,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertTrue(gasback.setGasbackRatioNumerator(0.9 ether));
         assertTrue(gasback.setGasbackMaxBaseFee(123));
         assertTrue(gasback.setBaseFeeVault(address(0x1234)));
-        assertTrue(gasback.setAccuralWithdrawer(address(0x99), true));
+        assertTrue(gasback.setAccrualWithdrawer(address(0x99), true));
         assertTrue(gasback.withdraw(address(0xA11CE), 0.2 ether));
         vm.stopPrank();
 
@@ -140,7 +140,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(gasback.baseFeeVaultShareNumerator(), 0.9 ether);
         assertEq(gasback.gasbackMaxBaseFee(), 123);
         assertEq(gasback.baseFeeVault(), address(0x1234));
-        assertTrue(gasback.isAuthorizedAccuralWithdrawer(address(0x99)));
+        assertTrue(gasback.isAuthorizedAccrualWithdrawer(address(0x99)));
         assertEq(address(0xA11CE).balance, 0.2 ether);
     }
 
@@ -156,7 +156,7 @@ contract GasbackExtendedTest is SoladyTest {
         vm.prank(address(gasback));
         assertTrue(gasback.setBaseFeeVault(address(0x4321)));
         vm.prank(address(gasback));
-        assertTrue(gasback.setAccuralWithdrawer(address(this), true));
+        assertTrue(gasback.setAccrualWithdrawer(address(this), true));
         vm.prank(address(gasback));
         assertTrue(gasback.withdraw(address(0xB0B), 0.25 ether));
 
@@ -164,7 +164,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(gasback.baseFeeVaultShareNumerator(), 1 ether);
         assertEq(gasback.gasbackMaxBaseFee(), 77);
         assertEq(gasback.baseFeeVault(), address(0x4321));
-        assertTrue(gasback.isAuthorizedAccuralWithdrawer(address(this)));
+        assertTrue(gasback.isAuthorizedAccrualWithdrawer(address(this)));
         assertEq(address(0xB0B).balance, 0.25 ether);
     }
 
@@ -550,7 +550,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 withdrawAmount = 40;
 
         vm.prank(SYSTEM_ADDRESS);
-        gasback.setAccuralWithdrawer(address(this), true);
+        gasback.setAccrualWithdrawer(address(this), true);
 
         address recipient = address(0xCAFE);
         uint256 before = recipient.balance;
@@ -575,7 +575,7 @@ contract GasbackExtendedTest is SoladyTest {
         vm.deal(address(gasback), accruedAmount);
 
         vm.prank(SYSTEM_ADDRESS);
-        gasback.setAccuralWithdrawer(address(this), true);
+        gasback.setAccrualWithdrawer(address(this), true);
 
         address recipient = address(0xD00D);
         uint256 beforeBalance = recipient.balance;
@@ -596,15 +596,15 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(gasback.accrued(), accruedAmount);
     }
 
-    function test_setAccuralWithdrawerRevokeBlocksWithdrawAccrued() public {
+    function test_setAccrualWithdrawerRevokeBlocksWithdrawAccrued() public {
         _accrueViaPayout(10, 100);
 
         vm.startPrank(SYSTEM_ADDRESS);
-        gasback.setAccuralWithdrawer(address(this), true);
-        gasback.setAccuralWithdrawer(address(this), false);
+        gasback.setAccrualWithdrawer(address(this), true);
+        gasback.setAccrualWithdrawer(address(this), false);
         vm.stopPrank();
 
-        assertFalse(gasback.isAuthorizedAccuralWithdrawer(address(this)));
+        assertFalse(gasback.isAuthorizedAccrualWithdrawer(address(this)));
 
         vm.expectRevert();
         gasback.withdrawAccrued(address(this), 1);
@@ -614,7 +614,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 accruedAmount = _accrueViaPayout(10, 100);
 
         vm.prank(SYSTEM_ADDRESS);
-        gasback.setAccuralWithdrawer(address(this), true);
+        gasback.setAccrualWithdrawer(address(this), true);
 
         vm.expectRevert();
         gasback.withdrawAccrued(address(this), accruedAmount + 1);
@@ -631,7 +631,7 @@ contract GasbackExtendedTest is SoladyTest {
         assertEq(accruedAmount, 0);
 
         vm.prank(SYSTEM_ADDRESS);
-        gasback.setAccuralWithdrawer(address(this), true);
+        gasback.setAccrualWithdrawer(address(this), true);
 
         vm.expectRevert();
         gasback.withdrawAccrued(address(this), 1);
@@ -645,7 +645,7 @@ contract GasbackExtendedTest is SoladyTest {
         vm.deal(address(gasback), accruedAmount);
 
         vm.prank(SYSTEM_ADDRESS);
-        gasback.setAccuralWithdrawer(address(this), true);
+        gasback.setAccrualWithdrawer(address(this), true);
 
         vm.expectRevert();
         gasback.withdrawAccrued(address(rejector), 1);
@@ -657,7 +657,7 @@ contract GasbackExtendedTest is SoladyTest {
         uint256 accruedAmount = _accrueViaPayout(10, 100);
 
         vm.prank(SYSTEM_ADDRESS);
-        gasback.setAccuralWithdrawer(address(this), true);
+        gasback.setAccrualWithdrawer(address(this), true);
 
         vm.expectRevert();
         gasback.withdrawAccrued(address(0xCAFE), 1);
