@@ -16,6 +16,14 @@ contract Gasback {
     uint256 public constant GASBACK_RATIO_DENOMINATOR = 1 ether;
 
     /*«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-*/
+    /*                           ERRORS                           */
+    /*-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»*/
+
+    /// @dev The base fee vault share numerator does not match this contract's live share in the
+    /// base fee vault's recipient splitter.
+    error BaseFeeVaultShareInconsistent(uint256 provided, uint256 expected);
+
+    /*«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-«-*/
     /*                          STORAGE                           */
     /*-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»*/
 
@@ -155,12 +163,58 @@ contract Gasback {
     }
 
     /// @dev Sets the numerator for the share of the base fee vault.
+    /// @dev When the base fee vault's recipient is a splitter exposing `shares`/`totalShares`,
+    /// `value` must equal this contract's live share `(shares(this) * GASBACK_RATIO_DENOMINATOR) /
+    /// totalShares`, so the fallback's `expectedShare` estimate stays consistent with the ETH the
+    /// splitter actually routes back. The check is skipped when no such splitter is detectable
+    /// (unset/codeless vault, no `recipient()`, a non-splitter recipient, or the EIP-7702 setup
+    /// where the recipient is this contract). Re-point the vault before calling this, and re-call
+    /// this after changing the vault, to keep the numerator consistent.
     function setBaseFeeVaultShareNumerator(uint256 value) public onlySystemOrThis returns (bool) {
         GasbackStorage storage $ = _getGasbackStorage();
         require(value <= GASBACK_RATIO_DENOMINATOR);
         require(value >= $.gasbackRatioNumerator);
+        (bool applicable, uint256 expected) = _expectedBaseFeeVaultShareNumerator();
+        if (applicable && value != expected) {
+            revert BaseFeeVaultShareInconsistent(value, expected);
+        }
         $.baseFeeVaultShareNumerator = value;
         return true;
+    }
+
+    /// @dev Returns this contract's expected base fee vault share numerator derived from live
+    /// on-chain state: `(splitter.shares(this) * GASBACK_RATIO_DENOMINATOR) / splitter.totalShares()`,
+    /// where the splitter is the base fee vault's `recipient()`. `applicable` is false (and `expected`
+    /// must be ignored) when there is no readable splitter topology, namely: the base fee vault is
+    /// unset or has no code; it has no readable `recipient()`; the recipient is this contract (the
+    /// EIP-7702 setup) or has no code; or `totalShares()`/`shares(address)` is unreadable or zero.
+    /// All external reads are guarded `staticcall`s so an absent/incompatible recipient never reverts
+    /// this path; it simply makes the consistency check inapplicable.
+    function _expectedBaseFeeVaultShareNumerator()
+        internal
+        view
+        returns (bool applicable, uint256 expected)
+    {
+        address vault = _getGasbackStorage().baseFeeVault;
+        if (vault == address(0) || vault.code.length == 0) return (false, 0);
+
+        (bool ok, bytes memory data) = vault.staticcall(abi.encodeWithSignature("recipient()"));
+        if (!ok || data.length != 32) return (false, 0);
+        address splitter = abi.decode(data, (address));
+        if (splitter == address(this) || splitter == address(0) || splitter.code.length == 0) {
+            return (false, 0);
+        }
+
+        (ok, data) = splitter.staticcall(abi.encodeWithSignature("totalShares()"));
+        if (!ok || data.length != 32) return (false, 0);
+        uint256 totalShares = abi.decode(data, (uint256));
+        if (totalShares == 0) return (false, 0);
+
+        (ok, data) = splitter.staticcall(abi.encodeWithSignature("shares(address)", address(this)));
+        if (!ok || data.length != 32) return (false, 0);
+        uint256 gasbackShares = abi.decode(data, (uint256));
+
+        return (true, (gasbackShares * GASBACK_RATIO_DENOMINATOR) / totalShares);
     }
 
     /// @dev A noop function.
