@@ -46,6 +46,15 @@ contract FeeVaultSplitter is PaymentSplitter, ReentrancyGuard {
      * To learn more about this see the Solidity documentation for
      * https://solidity.readthedocs.io/en/latest/contracts.html#fallback-function[fallback
      * functions].
+     *
+     * SECURITY / DoS NOTE (push-payment model): this function attempts to release to every payee in
+     * `externalPayees` in a single call. Its gas cost therefore scales with the payee count, and a payee whose
+     * `receive`/fallback consumes a large amount of gas (rather than cheaply reverting, which is caught and skipped)
+     * can push this call out of gas and make it revert. Because the OP base fee vault's `withdraw()` sends fees to
+     * this contract (triggering `receive`), such a revert would block that withdrawal and strand base fees in the
+     * vault until resolved. To bound this risk: keep the payee set small and trusted (it is fixed at deployment).
+     * If a deposit's auto-distribution is ever blocked, funds are not lost — anyone can call {distribute} with a
+     * bounded `[start, end)` slice to release payees in chunks and recover.
      */
     receive() external payable override(PaymentSplitter) nonReentrant {
         emit PaymentReceived(_msgSender(), msg.value);

@@ -79,12 +79,52 @@ contract GasbackTest is SoladyTest {
         // With `accrued` and the contract balance both covering `amount`, only the
         // authorization check can fail.
         address unauthorized = address(0xBAD);
-        assertFalse(gasback.isAuthorizedAccuralWithdrawer(unauthorized));
+        assertFalse(gasback.isAuthorizedAccrualWithdrawer(unauthorized));
         vm.prank(unauthorized);
         vm.expectRevert();
         gasback.withdrawAccrued(address(0xCAFE), accruedAmount);
 
         assertEq(gasback.accrued(), accruedAmount);
+    }
+
+    function _accrueCut() internal returns (uint256 accruedAmount) {
+        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
+        // Lower the ratio below the vault share so the fallback accrues a cut.
+        vm.prank(system);
+        gasback.setGasbackRatioNumerator(0.5 ether);
+        vm.fee(100);
+        vm.prank(address(111));
+        (bool ok,) = address(gasback).call(abi.encode(uint256(1000)));
+        assertTrue(ok);
+        accruedAmount = gasback.accrued();
+        assertGt(accruedAmount, 0);
+    }
+
+    function testWithdrawReconcilesAccruedDownToBalance() public {
+        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
+        uint256 accruedAmount = _accrueCut();
+
+        // No buffer: balance exactly backs accrued. Withdrawing part must lower accrued to match.
+        vm.deal(address(gasback), accruedAmount);
+        vm.prank(system);
+        assertTrue(gasback.withdraw(address(0xCAFE), accruedAmount / 4));
+
+        uint256 remaining = accruedAmount - accruedAmount / 4;
+        assertEq(gasback.accrued(), remaining);
+        assertEq(address(gasback).balance, remaining);
+    }
+
+    function testWithdrawLeavesAccruedWhenBufferCovers() public {
+        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
+        uint256 accruedAmount = _accrueCut();
+
+        // Buffer present: balance stays above accrued after the withdrawal, so accrued is untouched.
+        vm.deal(address(gasback), accruedAmount * 10);
+        vm.prank(system);
+        assertTrue(gasback.withdraw(address(0xCAFE), accruedAmount));
+
+        assertEq(gasback.accrued(), accruedAmount);
+        assertEq(address(gasback).balance, accruedAmount * 9);
     }
 
     function testSetGasbackRatioNumeratorRevertsWhenValueAboveDenominator() public {

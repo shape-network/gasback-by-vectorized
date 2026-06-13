@@ -139,6 +139,18 @@ contract FeeVaultSplitterTest is SoladyTest {
         assertEq(splitter.payee(2), payee3);
     }
 
+    function test_externalPayees_length_matches_payee_count() public {
+        splitter = _deployDefaultSplitter();
+
+        // Regression guard for the constructor double-fill bug: externalPayees must have exactly
+        // one entry per payee (length N), not 2N with leading zero-address slots.
+        assertEq(splitter.externalPayees(0), payee1);
+        assertEq(splitter.externalPayees(1), payee2);
+        assertEq(splitter.externalPayees(2), payee3);
+        vm.expectRevert(); // index 3 is out of bounds => length is exactly 3
+        splitter.externalPayees(3);
+    }
+
     function test_balances_after_payment() public {
         uint256 paymentAmount = 10 ether;
 
@@ -178,6 +190,27 @@ contract FeeVaultSplitterTest is SoladyTest {
         assertEq(balanceAfter1 - balanceBefore1, 4.8 ether, "Payee1 should receive 4.8 ether");
         assertEq(balanceAfter2 - balanceBefore2, 4.2 ether, "Payee2 should receive 4.2 ether");
         assertEq(balanceAfter3 - balanceBefore3, 1 ether, "Payee3 should receive 1 ether");
+        assertEq(address(splitter).balance, 0);
+    }
+
+    function test_receive_emits_payment_received() public {
+        splitter = _deployDefaultSplitter();
+
+        uint256 paymentAmount = 10 ether;
+
+        vm.deal(address(this), paymentAmount);
+        // receive() emits PaymentReceived first, then PaymentReleased per payee during _distribute.
+        vm.expectEmit(true, true, true, true, address(splitter));
+        emit PaymentReceived(address(this), paymentAmount);
+        vm.expectEmit(true, true, true, true, address(splitter));
+        emit PaymentReleased(payee1, 4.8 ether);
+        vm.expectEmit(true, true, true, true, address(splitter));
+        emit PaymentReleased(payee2, 4.2 ether);
+        vm.expectEmit(true, true, true, true, address(splitter));
+        emit PaymentReleased(payee3, 1 ether);
+
+        (bool success,) = address(splitter).call{value: paymentAmount}("");
+        assertTrue(success, "Payment to splitter failed");
     }
 
     function test_receive_allows_small_payment() public {
@@ -441,23 +474,6 @@ contract FeeVaultSplitterTest is SoladyTest {
         // Direct release should still revert since the payee rejects ETH
         vm.expectRevert("Address: unable to send value, recipient may have reverted");
         rejectorSplitter.release(payable(address(rejecter)));
-    }
-
-    function test_receive_emits_payment_received() public {
-        uint256 paymentAmount = 10 ether;
-
-        vm.deal(address(this), paymentAmount);
-        vm.expectEmit(true, true, true, true, address(splitter));
-        emit PaymentReceived(address(this), paymentAmount);
-        vm.expectEmit(true, true, true, true, address(splitter));
-        emit PaymentReleased(payee1, 4.8 ether);
-        vm.expectEmit(true, true, true, true, address(splitter));
-        emit PaymentReleased(payee2, 4.2 ether);
-        vm.expectEmit(true, true, true, true, address(splitter));
-        emit PaymentReleased(payee3, 1 ether);
-
-        (bool success,) = address(splitter).call{value: paymentAmount}("");
-        assertTrue(success, "Payment to splitter failed");
     }
 
     function test_receive_reverts_on_reentrant_payee() public {
