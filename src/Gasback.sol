@@ -125,11 +125,16 @@ contract Gasback {
     /*-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»-»*/
 
     /// @dev Withdraws ETH from this contract.
+    /// @dev Reconciles the accrued ledger so it never overstates the ETH backing it: if this
+    /// withdrawal leaves the balance below `accrued`, `accrued` is lowered to the remaining balance.
     function withdraw(address to, uint256 amount) public onlySystemOrThis returns (bool) {
         /// @solidity memory-safe-assembly
         assembly {
             if iszero(call(gas(), to, amount, 0x00, 0x00, 0x00, 0x00)) { revert(0x00, 0x00) }
         }
+        GasbackStorage storage $ = _getGasbackStorage();
+        uint256 balanceAfter = address(this).balance;
+        if ($.accrued > balanceAfter) $.accrued = balanceAfter;
         return true;
     }
 
