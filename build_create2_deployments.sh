@@ -11,15 +11,21 @@ mkdir create2 > /dev/null 2>&1;
 mkdir .tmp > /dev/null 2>&1;
 rm -rf .tmp/src > /dev/null 2>&1;
 rm -rf .tmp/lib > /dev/null 2>&1;
+rm -rf .tmp/beacon > /dev/null 2>&1;
 cp -r src .tmp/src;
 cp -r foundry.toml .tmp/foundry.toml;
 cp -r lib .tmp/lib;
+mkdir -p .tmp/beacon/src;
+cp src/Gasback.sol src/GasbackBeacon.sol .tmp/beacon/src;
+cp foundry-beacon.toml .tmp/beacon/foundry.toml;
+ln -s ../lib .tmp/beacon/lib;
 
 # Go into the temporary directory. 
 cd .tmp;
 
 # Build the Solidity files.
 forge build --out="out" --root=".";
+(cd beacon && forge build --out="out" --root=".");
 
 # Install some files for computing the initcodehash.
 echo '{ "devDependencies": { "@ethersproject/keccak256": "5.7.0" } }' > package.json;
@@ -36,7 +42,7 @@ generateDeployment() {
     echo "
     const fs = require(\"fs\"), 
     rfs = s => fs.readFileSync(s, { encoding: \"utf8\", flag: \"r\" });
-    const solcOutput = JSON.parse(rfs(\"out/$1.sol/$1.json\"));
+    const solcOutput = JSON.parse(rfs(\"$2/out/$1.sol/$1.json\"));
     const initcode = solcOutput[\"bytecode\"][\"object\"].slice(2);
     const d = \"create2/$1\";
     fs.writeFileSync(d + \"/initcode.txt\", initcode);
@@ -47,7 +53,11 @@ generateDeployment() {
     # Run the js file.
     node "extract_$1.js";
     # Generate the standard json verification file.
-    forge verify-contract $(cast --address-zero) "$(<create2/$1/t)" --show-standard-json-input > "create2/$1/input.json";
+    if [ "$2" = "." ]; then
+        forge verify-contract $(cast --address-zero) "$(<create2/$1/t)" --show-standard-json-input > "create2/$1/input.json";
+    else
+        (cd "$2" && forge verify-contract $(cast --address-zero) "$(<../create2/$1/t)" --show-standard-json-input) > "create2/$1/input.json";
+    fi
     # Remove the temporary files.
     rm "create2/$1/t" > /dev/null 2>&1;
     rm "extract_$1.js" > /dev/null 2>&1;
@@ -58,5 +68,5 @@ generateDeployment() {
 }
 
 # Generate the deployments.
-generateDeployment "Gasback";
-generateDeployment "GasbackBeacon";
+generateDeployment "Gasback" ".";
+generateDeployment "GasbackBeacon" "beacon";

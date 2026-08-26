@@ -42,6 +42,26 @@ jobs:
             forge test --fuzz-runs 5000
           )
 
+  shape-legacy-tests:
+    name: Shape Legacy Testing
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Install Dependencies
+        run: |
+          forge install
+          forge soldeer install --config-location soldeer
+
+      - name: Run preserved Shape tests
+        run: FOUNDRY_PROFILE=shape-legacy forge test
+
   codespell:
     runs-on: ${{ matrix.os }}
     strategy:

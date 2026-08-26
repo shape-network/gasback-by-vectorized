@@ -25,6 +25,13 @@ line_length = 100 # While we allow up to 120, we lint at 100 for readability.
 [profile.default.fuzz]
 runs = 256
 
+[profile.shape-legacy]
+src = "shape-tests/src"
+test = "shape-tests/test"
+out = "out/shape-legacy"
+cache_path = "cache/shape-legacy"
+solc_version = "0.8.28"
+
 [invariant]
 runs = 30
 depth = 15
