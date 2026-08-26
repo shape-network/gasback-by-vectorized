@@ -1,21 +1,14 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.28;
+pragma solidity 0.8.34;
 
 import {PaymentSplitter} from "@openzeppelin/contracts/finance/PaymentSplitter.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 /**
  * @title FeeVaultSplitter
- * @dev This contract, forked from OpenZeppelin's PaymentSplitter, allows for splitting Ether payments among a group of accounts.
- * It has been modified by Shape to remove ERC20 interactions, focusing solely on Ether distribution.
- *
- * The split can be in equal parts or in any other arbitrary proportion, specified by assigning shares to each account.
- * Each account can claim an amount proportional to their percentage of total shares. The share distribution is set at
- * contract deployment and cannot be updated thereafter.
+ * @dev This contract, implements OpenZeppelin's PaymentSplitter, supports splitting Ether payments among a group of accounts.
  *
  * FeeVaultSplitter follows a _push payment_ model. Incoming Ether triggers an attempt to release funds to all payees.
- *
- * The sender of Ether to this contract does not need to be aware of the split mechanism, as it is handled transparently.
  */
 contract FeeVaultSplitter is PaymentSplitter, ReentrancyGuard {
     event PaymentFailed(address to, uint256 amount, bytes reason);
@@ -23,7 +16,7 @@ contract FeeVaultSplitter is PaymentSplitter, ReentrancyGuard {
     address[] public externalPayees;
 
     /**
-     * @dev Creates an instance of `FeeVaultSplitter` where each account in `payees` is assigned the number of shares at
+     * @dev Creates an instance of `PaymentSplitter` where each account in `payees` is assigned the number of shares at
      * the matching position in the `shares` array.
      *
      * All addresses in `payees` must be non-zero. Both arrays must have the same non-zero length, and there must be no
@@ -47,12 +40,14 @@ contract FeeVaultSplitter is PaymentSplitter, ReentrancyGuard {
      * https://solidity.readthedocs.io/en/latest/contracts.html#fallback-function[fallback
      * functions].
      *
-     * SECURITY / DoS NOTE (push-payment model): this function attempts to release to every payee in
-     * `externalPayees` in a single call. Its gas cost therefore scales with the payee count, and a payee whose
-     * `receive`/fallback consumes a large amount of gas (rather than cheaply reverting, which is caught and skipped)
-     * can push this call out of gas and make it revert. Because the OP base fee vault's `withdraw()` sends fees to
-     * this contract (triggering `receive`), such a revert would block that withdrawal and strand base fees in the
-     * vault until resolved. To bound this risk: keep the payee set small and trusted (it is fixed at deployment).
+     * SECURITY / DoS NOTE (push-payment model): this function attempts to release to every payee in `externalPayees`
+     * in a single call. Its gas cost therefore scales with the payee count, and a payee whose `receive`/fallback
+     * consumes a large amount of gas (rather than cheaply reverting, which is caught and skipped) can push this call
+     * out of gas and make it revert. Because the OP base fee vault's `withdraw()` sends fees to this contract
+     * (triggering `receive`), such a revert would block that withdrawal and strand base fees in the vault until resolved.
+     * Additionally, a malicious payee ordered after the Gasback contract in `payees_` can re-enter the Gasback contract
+     * during distribution and use up the ETH just released to it, leaving no ETH for the original caller so their call is skipped.
+     * To bound this risk: keep the payee set small and trusted (it is fixed at deployment).
      * If a deposit's auto-distribution is ever blocked, funds are not lost — anyone can call {distribute} with a
      * bounded `[start, end)` slice to release payees in chunks and recover.
      */
@@ -66,7 +61,7 @@ contract FeeVaultSplitter is PaymentSplitter, ReentrancyGuard {
      * @dev Attempts to release payments for a slice of payees, skipping zero-due payees and emitting failures instead of
      * reverting on send failures.
      */
-    function distribute(uint256 start, uint256 end) public {
+    function distribute(uint256 start, uint256 end) public nonReentrant {
         _distribute(start, end);
     }
 
