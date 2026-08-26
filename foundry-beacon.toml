@@ -1,0 +1,12 @@
+[profile.default]
+solc_version = "0.8.28"
+evm_version = "london"
+auto_detect_solc = false
+optimizer = true
+optimizer_runs = 1000
+via_ir = true
+remappings = [
+  "murky=lib/murky",
+  "dn404/=lib/dn404/src",
+  "solady=lib/solady/src"
+]

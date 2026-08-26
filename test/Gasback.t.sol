@@ -2,12 +2,37 @@
 pragma solidity ^0.8.4;
 
 import "./utils/SoladyTest.sol";
+import {FeeVaultSplitter} from "../src/FeeVaultSplitter.sol";
 import {Gasback} from "../src/Gasback.sol";
 
+contract MockBaseFeeVault {
+    address public recipient;
+    bool public shouldRevert;
+
+    constructor(address recipient_) payable {
+        recipient = recipient_;
+    }
+
+    function setShouldRevert(bool value) public {
+        shouldRevert = value;
+    }
+
+    function withdraw() public {
+        require(!shouldRevert);
+        (bool success,) = recipient.call{value: address(this).balance}("");
+        require(success);
+    }
+
+    receive() external payable {}
+}
+
 contract GasbackTest is SoladyTest {
+    address internal constant SYSTEM = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
+
     Gasback public gasback;
 
     function setUp() public {
+        vm.txGasPrice(1);
         gasback = new Gasback();
         vm.deal(address(gasback), 2 ** 160);
     }
@@ -21,11 +46,7 @@ contract GasbackTest is SoladyTest {
         vm.prank(pranker);
         (bool success,) = address(gasback).call(abi.encode(gasToBurn));
         assertTrue(success);
-        assertEq(
-            pranker.balance,
-            (gasToBurn * baseFee * gasback.gasbackRatioNumerator())
-                / gasback.GASBACK_RATIO_DENOMINATOR()
-        );
+        assertEq(pranker.balance, _ethToGive(gasToBurn, baseFee));
     }
 
     function testConvertGasback() public {
@@ -34,8 +55,7 @@ contract GasbackTest is SoladyTest {
 
     function testConvertGasbackMaxBaseFee() public {
         uint256 newMaxBaseFee = 42;
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
-        vm.prank(system);
+        vm.prank(SYSTEM);
         gasback.setGasbackMaxBaseFee(newMaxBaseFee);
         vm.fee(newMaxBaseFee + 1);
 
@@ -49,119 +69,171 @@ contract GasbackTest is SoladyTest {
         assertEq(pranker.balance, 0);
     }
 
-    function testConvertGasbackBaseFeeVault() public {
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
-        vm.prank(system);
+    function testConvertGasbackCodelessBaseFeeVaultPassesThrough() public {
+        vm.deal(address(gasback), 0);
+        vm.prank(SYSTEM);
         gasback.setBaseFeeVault(address(42));
-
-        uint256 gasToBurn = 333;
+        vm.fee(1 gwei);
 
         address pranker = address(111);
+        vm.prank(pranker);
+        (bool success,) = address(gasback).call(abi.encode(uint256(1_000_000)));
+        assertTrue(success);
         assertEq(pranker.balance, 0);
+        assertEq(address(gasback).balance, 0);
+    }
+
+    function testConvertGasbackRevertingBaseFeeVaultPassesThrough() public {
+        vm.deal(address(gasback), 0);
+        MockBaseFeeVault vault = new MockBaseFeeVault(address(gasback));
+        vault.setShouldRevert(true);
+        uint256 vaultBalance = 1 ether;
+        vm.deal(address(vault), vaultBalance);
+        vm.prank(SYSTEM);
+        gasback.setBaseFeeVault(address(vault));
+        vm.fee(1 gwei);
+
+        address pranker = address(111);
+        vm.prank(pranker);
+        (bool success,) = address(gasback).call(abi.encode(uint256(1_000_000)));
+        assertTrue(success);
+        assertEq(pranker.balance, 0);
+        assertEq(address(gasback).balance, 0);
+        assertEq(address(vault).balance, vaultBalance);
+    }
+
+    function testConvertGasbackPullsFromDirectRecipientBaseFeeVault() public {
+        vm.deal(address(gasback), 0);
+        MockBaseFeeVault vault = new MockBaseFeeVault(address(gasback));
+        uint256 baseFee = 1 gwei;
+        uint256 gasToBurn = 1_000_000;
+        uint256 ethToGive = _ethToGive(gasToBurn, baseFee);
+        vm.deal(address(vault), ethToGive);
+        vm.prank(SYSTEM);
+        gasback.setBaseFeeVault(address(vault));
+        vm.fee(baseFee);
+
+        address pranker = address(111);
+        vm.prank(pranker);
+        (bool success,) = address(gasback).call(abi.encode(gasToBurn));
+        assertTrue(success);
+        assertEq(pranker.balance, ethToGive);
+        assertEq(address(gasback).balance, 0);
+        assertEq(address(vault).balance, 0);
+    }
+
+    function testConvertGasbackPullsFromSplitterRecipientBaseFeeVault() public {
+        vm.deal(address(gasback), 0);
+        address externalPayee = address(0xBEEF);
+        address[] memory payees = new address[](2);
+        payees[0] = address(gasback);
+        payees[1] = externalPayee;
+        uint256[] memory shares = new uint256[](2);
+        shares[0] = 80;
+        shares[1] = 20;
+        FeeVaultSplitter splitter = new FeeVaultSplitter(payees, shares);
+        MockBaseFeeVault vault = new MockBaseFeeVault(address(splitter));
+        uint256 baseFee = 1 gwei;
+        uint256 gasToBurn = 1_000_000;
+        uint256 ethToGive = _ethToGive(gasToBurn, baseFee);
+        vm.deal(address(vault), ethToGive * 2);
+        vm.prank(SYSTEM);
+        gasback.setBaseFeeVault(address(vault));
+        vm.fee(baseFee);
+
+        address pranker = address(111);
+        vm.prank(pranker);
+        (bool success,) = address(gasback).call(abi.encode(gasToBurn));
+        assertTrue(success);
+        assertEq(pranker.balance, ethToGive);
+        assertEq(address(vault).balance, 0);
+        assertEq(address(splitter).balance, 0);
+        assertEq(externalPayee.balance, (ethToGive * 2 * 20) / 100);
+        assertEq(address(gasback).balance, (ethToGive * 2 * 80) / 100 - ethToGive);
+    }
+
+    function testConvertGasbackRevertsInnerWithdrawWhenSplitterShareInsufficient() public {
+        vm.deal(address(gasback), 0);
+        address externalPayee = address(0xBEEF);
+        address[] memory payees = new address[](2);
+        payees[0] = address(gasback);
+        payees[1] = externalPayee;
+        uint256[] memory shares = new uint256[](2);
+        shares[0] = 50;
+        shares[1] = 50;
+        FeeVaultSplitter splitter = new FeeVaultSplitter(payees, shares);
+        MockBaseFeeVault vault = new MockBaseFeeVault(address(splitter));
+        uint256 baseFee = 1 gwei;
+        uint256 gasToBurn = 1_000_000;
+        uint256 ethToGive = _ethToGive(gasToBurn, baseFee);
+        vm.deal(address(vault), ethToGive);
+        vm.prank(SYSTEM);
+        gasback.setBaseFeeVault(address(vault));
+        vm.fee(baseFee);
+
+        address pranker = address(111);
         vm.prank(pranker);
         (bool success,) = address(gasback).call(abi.encode(gasToBurn));
         assertTrue(success);
         assertEq(pranker.balance, 0);
+        assertEq(address(gasback).balance, 0);
+        assertEq(address(vault).balance, ethToGive);
+        assertEq(address(splitter).balance, 0);
+        assertEq(externalPayee.balance, 0);
     }
 
-    function testWithdrawAccruedRevertsWhenCallerUnauthorized() public {
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
-        // Lower the ratio below the vault share numerator so the fallback accrues a cut.
-        vm.prank(system);
-        gasback.setGasbackRatioNumerator(0.5 ether);
-        vm.fee(100);
-        vm.prank(address(111));
-        (bool success,) = address(gasback).call(abi.encode(uint256(1000)));
-        assertTrue(success);
-        uint256 accruedAmount = gasback.accrued();
-        assertGt(accruedAmount, 0);
+    function testTriggerBaseFeeVaultWithdrawRevertsWhenCallerIsNotSelf() public {
+        vm.expectRevert();
+        gasback.triggerBaseFeeVaultWithdraw(0);
+    }
 
-        // With `accrued` and the contract balance both covering `amount`, only the
-        // authorization check can fail.
+    function testWithdrawRevertsWhenCallerUnauthorized() public {
         address unauthorized = address(0xBAD);
-        assertFalse(gasback.isAuthorizedAccrualWithdrawer(unauthorized));
         vm.prank(unauthorized);
         vm.expectRevert();
-        gasback.withdrawAccrued(address(0xCAFE), accruedAmount);
-
-        assertEq(gasback.accrued(), accruedAmount);
+        gasback.withdraw(address(0xCAFE), 0);
     }
 
-    function _accrueCut() internal returns (uint256 accruedAmount) {
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
-        // Lower the ratio below the vault share so the fallback accrues a cut.
-        vm.prank(system);
-        gasback.setGasbackRatioNumerator(0.5 ether);
-        vm.fee(100);
-        vm.prank(address(111));
-        (bool ok,) = address(gasback).call(abi.encode(uint256(1000)));
-        assertTrue(ok);
-        accruedAmount = gasback.accrued();
-        assertGt(accruedAmount, 0);
+    function testWithdrawTransfersEthWhenCallerSystem() public {
+        address recipient = address(0xCAFE);
+        uint256 amount = 1 ether;
+        uint256 initialGasbackBalance = address(gasback).balance;
+        uint256 initialRecipientBalance = recipient.balance;
+        vm.prank(SYSTEM);
+        assertTrue(gasback.withdraw(recipient, amount));
+
+        assertEq(recipient.balance - initialRecipientBalance, amount);
+        assertEq(address(gasback).balance, initialGasbackBalance - amount);
     }
 
-    function testWithdrawReconcilesAccruedDownToBalance() public {
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
-        uint256 accruedAmount = _accrueCut();
+    function testWithdrawTransfersEthWhenCallerSelf() public {
+        address recipient = address(0xCAFE);
+        uint256 amount = 1 ether;
+        uint256 initialGasbackBalance = address(gasback).balance;
+        uint256 initialRecipientBalance = recipient.balance;
+        vm.prank(address(gasback));
+        assertTrue(gasback.withdraw(recipient, amount));
 
-        // No buffer: balance exactly backs accrued. Withdrawing part must lower accrued to match.
-        vm.deal(address(gasback), accruedAmount);
-        vm.prank(system);
-        assertTrue(gasback.withdraw(address(0xCAFE), accruedAmount / 4));
-
-        uint256 remaining = accruedAmount - accruedAmount / 4;
-        assertEq(gasback.accrued(), remaining);
-        assertEq(address(gasback).balance, remaining);
-    }
-
-    function testWithdrawLeavesAccruedWhenBufferCovers() public {
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
-        uint256 accruedAmount = _accrueCut();
-
-        // Buffer present: balance stays above accrued after the withdrawal, so accrued is untouched.
-        vm.deal(address(gasback), accruedAmount * 10);
-        vm.prank(system);
-        assertTrue(gasback.withdraw(address(0xCAFE), accruedAmount));
-
-        assertEq(gasback.accrued(), accruedAmount);
-        assertEq(address(gasback).balance, accruedAmount * 9);
+        assertEq(recipient.balance - initialRecipientBalance, amount);
+        assertEq(address(gasback).balance, initialGasbackBalance - amount);
     }
 
     function testSetGasbackRatioNumeratorRevertsWhenValueAboveDenominator() public {
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
         uint256 value = gasback.GASBACK_RATIO_DENOMINATOR() + 1;
-        vm.prank(system);
+        vm.prank(SYSTEM);
         vm.expectRevert();
         gasback.setGasbackRatioNumerator(value);
     }
 
-    function testSetGasbackRatioNumeratorRevertsWhenValueAboveBaseFeeVaultShare() public {
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
-        // Within the denominator, so only the vault share check fails.
-        uint256 value = gasback.baseFeeVaultShareNumerator() + 1;
-        assertTrue(value <= gasback.GASBACK_RATIO_DENOMINATOR());
-        vm.prank(system);
-        vm.expectRevert();
-        gasback.setGasbackRatioNumerator(value);
+    function testSetGasbackRatioNumeratorAcceptsScriptValue() public {
+        uint256 value = 0.9 ether;
+        vm.prank(SYSTEM);
+        assertTrue(gasback.setGasbackRatioNumerator(value));
+        assertEq(gasback.gasbackRatioNumerator(), value);
     }
 
-    function testSetBaseFeeVaultShareNumeratorRevertsWhenValueAboveDenominator() public {
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
-        // Above the gasback ratio numerator, so only the denominator check fails.
-        uint256 value = gasback.GASBACK_RATIO_DENOMINATOR() + 1;
-        assertTrue(value >= gasback.gasbackRatioNumerator());
-        vm.prank(system);
-        vm.expectRevert();
-        gasback.setBaseFeeVaultShareNumerator(value);
-    }
-
-    function testSetBaseFeeVaultShareNumeratorRevertsWhenValueBelowGasbackRatio() public {
-        address system = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
-        // Within the denominator, so only the gasback ratio check fails.
-        uint256 value = gasback.gasbackRatioNumerator() - 1;
-        assertTrue(value <= gasback.GASBACK_RATIO_DENOMINATOR());
-        vm.prank(system);
-        vm.expectRevert();
-        gasback.setBaseFeeVaultShareNumerator(value);
+    function _ethToGive(uint256 gasToBurn, uint256 baseFee) internal view returns (uint256) {
+        return (gasToBurn * baseFee * gasback.gasbackRatioNumerator())
+            / gasback.GASBACK_RATIO_DENOMINATOR();
     }
 }

@@ -5,22 +5,12 @@ on:
     branches: [main]
     paths:
       - '**.sol'
-      - '**.ts'
       - '**.yml'
-      - '.env.example'
-      - 'bun.lock'
-      - 'package.json'
-      - 'tsconfig.json'
   push:
     branches: [main]
     paths:
       - '**.sol'
-      - '**.ts'
       - '**.yml'
-      - '.env.example'
-      - 'bun.lock'
-      - 'package.json'
-      - 'tsconfig.json'
 jobs:
   tests:
     name: Forge Testing
@@ -36,22 +26,24 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: nightly
+          version: v1.7.1
 
       - name: Install Dependencies
-        run: forge install
+        run: |
+          forge install
+          forge soldeer install --config-location soldeer
 
       - name: Run Tests with ${{ matrix.profile }}
         run: >
           ( [ "${{ matrix.profile }}" = "regular" ] &&
-            forge test --disable-labels
+            forge test
           ) ||
           ( [ "${{ matrix.profile }}" = "intense" ] &&
-            forge test --disable-labels --fuzz-runs 5000
+            forge test --fuzz-runs 5000
           )
 
-  gasback-live-system:
-    name: Gasback live system checks
+  shape-legacy-tests:
+    name: Shape Legacy Testing
     runs-on: ubuntu-latest
 
     steps:
@@ -60,27 +52,15 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: nightly
+          version: v1.7.1
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.9
+      - name: Install Dependencies
+        run: |
+          forge install
+          forge soldeer install --config-location soldeer
 
-      - name: Install Foundry Dependencies
-        run: forge install
-
-      - name: Install TypeScript Dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Run TypeScript Tests
-        run: bun run lint
-
-      - name: Run Local Gasback Suite
-        run: bun run gasback:local
-
-      - name: Run Fork Gasback Suite
-        run: bun run gasback:fork
+      - name: Run preserved Shape tests
+        run: FOUNDRY_PROFILE=shape-legacy forge test
 
   codespell:
     runs-on: ${{ matrix.os }}
