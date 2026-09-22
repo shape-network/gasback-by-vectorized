@@ -50,14 +50,25 @@ This version supports ETH only. It does not expose PaymentSplitter's ERC20 relea
 
 This is a separate deployment, not an upgrade to an existing immutable splitter. Existing deployment scripts and `shape_deployment.md` still target `FeeVaultSplitter`. To use the mutable version, deploy its bytecode with its three constructor arguments and have the chain operator configure the base fee vault recipient to its address. Old claims remain in the old splitter. CREATE2 addresses must be recalculated with the mutable bytecode and constructor arguments.
 
+## Intended Shape recipients
+
+The intended recipients are a Safe wallet and the repository's `Gasback`, deployed on Shape. The Safe is a payment recipient; the splitter owner remains the governance executor. The final recipient addresses have not been deployed or verified yet.
+
+The reference [Shape Safe proxy](https://shapescan.xyz/address/0x48946D090d9EB0d0ce4f0cdF7758fb8849b09f5A) delegates to [GnosisSafeL2 v1.3.0](https://shapescan.xyz/address/0xfb1bffC9d739B8D520DaF37dF666da4C687191EA#code), according to Shapescan's verified-contract API. Its empty-calldata ETH receipt only emits `SafeReceived`; it does not execute the configured fallback handler, refund ETH, or call Gasback. This repository's Gasback has an empty `receive()` function. Neither ordinary receipt path therefore triggers the adversarial refund or Gasback-reentry scenarios. Recipient ordering is not a required mitigation for these implementations.
+
+The tests use that implementation's captured runtime bytecode and the reference proxy's creation bytecode, with a freshly initialized test wallet. They do not copy the reference wallet's owners, modules or storage, and do not certify the future production Safe. A Safe is a proxy whose implementation/behavior can change through authorized operations; do not describe it as inherently non-upgradeable. Revalidate the implementation after migrations or customizations, and verify the actual recipient bytecode/configuration and Shape fee-vault route before deployment.
+
 ## Validation
 
 `test/MutableFeeVaultSplitter.t.sol` covers ownership, invalid configurations, automatic ETH payments to Gasback, preserved claims after updates and failures, zero shares, rounding dust, constructor and forced funding, large weights, reentrancy, and distribution slices. The adversarial suite adds gas and return-data attacks, CREATE2 prefunding, forced ETH during payment, and vault/Gasback integration. The invariant suite compares randomized operation sequences against a historical-interval accounting model.
 
 `test/MutableFeeVaultSplitterGovernance.t.sol` verifies a two-recipient deployment owned by the vendored OpenZeppelin TimelockController: scheduled execution, delay enforcement, unchanged pre-execution earnings, direct-call rejection and fixed recipient count. A differential fuzz test checks Gasback funding and payout behavior against the immutable splitter at the same positive allocation. This tests the governance execution boundary, not an unspecified production voting/quorum implementation.
 
+`test/MutableFeeVaultSplitterSafe.t.sol` exercises the captured Safe proxy/implementation with the repository's Gasback: automatic payouts before/after share changes in both recipient orders, cold-recipient transfers with a 100,000-gas stipend, and Gasback-triggered withdrawals from the local vault harness with empty and existing buffers. A reverting Safe fallback handler demonstrates that empty-calldata payouts do not invoke it. The offline fixture includes source URLs and bytecode SHA-256 hashes in `test/fixtures/safe-shape-v1.3.0.json`; Foundry permits read-only access to that fixture directory. No RPC or existing wallet funds are used.
+
 ```sh
 forge test --match-contract MutableFeeVaultSplitterTest
+forge test --match-contract MutableFeeVaultSplitterSafeTest
 forge test
 FOUNDRY_PROFILE=shape-legacy forge test
 forge fmt --check

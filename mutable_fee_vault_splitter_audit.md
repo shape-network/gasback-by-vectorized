@@ -57,6 +57,16 @@ Reviewed source SHA-256: `aa1c3ffc4096592904e2be63df09b3d029748da2aa053c704d3f38
 
 ## Required deployment rehearsal
 
+### Safe/Gasback recipient integration (2026-09-22)
+
+The intended Shape recipients are a Safe wallet and this repository's Gasback. `test/MutableFeeVaultSplitterSafe.t.sol` adds five offline integration tests using captured, verified GnosisSafeL2 v1.3.0 runtime bytecode and GnosisSafeProxy creation bytecode from Shapescan. Provenance URLs, reference addresses and SHA-256 hashes are recorded in `test/fixtures/safe-shape-v1.3.0.json`. Each test deploys and initializes a fresh proxy against that runtime; the reference wallet's production storage is not copied.
+
+Both recipient orders pass automatic payouts before/after share changes and Gasback-triggered local vault withdrawals with empty and existing buffers. Cold-recipient transfers succeed with a requested 100,000-gas stipend. A deliberately reverting Safe fallback handler does not intercept empty-calldata ETH receipts. The verified Safe receive path only emits `SafeReceived`, and Gasback's receive path is empty, so neither performs the callbacks required by the adversarial bounce/reentry examples. This conclusion is specific to these implementations; it does not make arbitrary payees safe or establish recipient ordering as a general reentry fix.
+
+Validation: `forge test --match-contract MutableFeeVaultSplitterSafeTest --ignored-error-codes 2424` passed all five new tests. `forge test --summary --ignored-error-codes 2424` passed 117 tests with zero failures/skips, including 49 splitter tests. `forge fmt --check` and `git diff --check` passed. Foundry's external signature-cache permission warning remained non-fatal. No production contract code changed. These runs do not replace the earlier intensive fuzz/invariant runs or constitute a live Shape fork test.
+
+The future Safe and Gasback recipient addresses are not yet deployed. The Safe is a proxy, not inherently non-upgradeable; validate its actual singleton and configuration and recheck after migrations/customizations. The vault used here is the local harness, and the owner is a simulated authorized caller; real Shape vault behavior and production governance remain part of the rehearsal below. The existing timelock suite separately tests governance execution.
+
 1. **Use the actual deployment inputs.** Verify owner, ordered recipient list, weights, chain ID, CREATE2 salt and derived address. Verify deployed bytecode against the tested artifact and confirm the chain supports its EVM target. These exact inputs were not provided for this review.
 2. **Exercise the actual governance system.** On a fork or testnet, run a proposal through voting, quorum/approval, any timelock, and execution of `setShares`. Verify the splitter owner is the contract making the final call. Demonstrate that a voter, recipient or unrelated caller cannot bypass it. If ownership migration is needed, execute both transfer and acceptance through the relevant controllers. Do not renounce ownership in production as a test.
 3. **Exercise the complete fee route.** Run a real fee-vault withdrawal into the splitter, measure each recipient's balance/claim delta, change percentages, repeat, and verify `totalReleased` and residual balance. Include a Gasback call that triggers a vault pull, not only a direct ETH transfer.
