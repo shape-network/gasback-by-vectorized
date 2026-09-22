@@ -2,6 +2,8 @@
 
 A barebones implementation of a gasback contract that implements [RIP-7767](https://github.com/ethereum/RIPs/blob/master/RIPS/rip-7767.md).
 
+For automatic ETH splitting with owner-adjustable shares and fixed recipients, see [Mutable fee vault splitter](mutable_fee_vault_splitter.md).
+
 ## Suggested setup for OP stack chains
 
 ### Requirements
