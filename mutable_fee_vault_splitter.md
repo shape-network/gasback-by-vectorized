@@ -14,9 +14,9 @@ The mutable contract adapts that cumulative ETH accounting and the existing push
 
 ## Configuration and ownership
 
-The intended deployment has **two fixed recipients and one governance-contract owner**. The owner is an authorization role, not a third payment recipient. Voting and proposal approval live in the governance system; the splitter only verifies the caller executing an approved update.
+The intended deployment has **two fixed recipients**, with ownership moving from the deployment controller to the **DUNE Safe**, then later to the **governance executor**. The owner is an authorization role, not a third payment recipient. Voting and proposal approval live in the governance system; the splitter only verifies the caller executing an approved update.
 
-Deploy with `constructor(address owner_, address[] payees_, uint256[] shares_)`, using two entries in each array. Pass the governance executor explicitly as `owner_`, including when deploying through a CREATE2 factory. If the Governor executes through a timelock, the timelock must own the splitter because it makes the call. If the governance contract executes proposals directly, that contract is the owner. The owner must be nonzero.
+Deploy with `constructor(address owner_, address[] payees_, uint256[] shares_)`, using two entries in each array. Pass the initial deployment controller explicitly as `owner_`, including when deploying through a CREATE2 factory. Follow [Part 1](shape_deployment.md#part-1--contract-deployment) to transfer ownership to the DUNE Safe and have the Safe accept it before routing fees. Once governance is ready, follow [Part 2](shape_deployment.md#part-2--chain-operator-setup) for the Safe to transfer ownership to the governance executor and governance to accept it. If the Governor executes through a timelock, the timelock must own the splitter because it makes the call. If the governance contract executes proposals directly, that contract is the owner. The owner must be nonzero.
 
 - Recipients are set once. They must be unique and cannot be zero or the splitter itself.
 - Shares are relative weights, in the original recipient order. `[60, 40]` means 60% and 40%; `[6250, 3750]` means 62.5% and 37.5%.
@@ -48,11 +48,11 @@ Keep the recipient list small and trusted. Transaction gas still scales with rec
 
 This version supports ETH only. It does not expose PaymentSplitter's ERC20 release functions or an ERC20 recovery function. Constructor funding is claimable through `release` or `distribute`; it does not trigger automatic distribution.
 
-This is a separate deployment, not an upgrade to an existing immutable splitter. Existing deployment scripts and `shape_deployment.md` still target `FeeVaultSplitter`. To use the mutable version, deploy its bytecode with its three constructor arguments and have the chain operator configure the base fee vault recipient to its address. Old claims remain in the old splitter. CREATE2 addresses must be recalculated with the mutable bytecode and constructor arguments.
+This is a separate deployment, not an upgrade to an existing immutable splitter. Existing deployment scripts still target `FeeVaultSplitter`; `shape_deployment.md` includes a mutable alternative and both ownership handoffs. To use the mutable version, deploy its bytecode with its three constructor arguments and have the chain operator configure the base fee vault recipient to its address. Old claims remain in the old splitter. CREATE2 addresses must be recalculated with the mutable bytecode and constructor arguments.
 
 ## Intended Shape recipients
 
-The intended recipients are a Safe wallet and the repository's `Gasback`, deployed on Shape. The Safe is a payment recipient; the splitter owner remains the governance executor. The final recipient addresses have not been deployed or verified yet.
+The intended recipients are the DUNE Safe and the repository's `Gasback`, deployed on Shape. The Safe receives payments and temporarily owns the splitter until governance accepts ownership. The final recipient addresses must be confirmed and verified before deployment.
 
 The reference [Shape Safe proxy](https://shapescan.xyz/address/0x48946D090d9EB0d0ce4f0cdF7758fb8849b09f5A) delegates to [GnosisSafeL2 v1.3.0](https://shapescan.xyz/address/0xfb1bffC9d739B8D520DaF37dF666da4C687191EA#code), according to Shapescan's verified-contract API. Its empty-calldata ETH receipt only emits `SafeReceived`; it does not execute the configured fallback handler, refund ETH, or call Gasback. This repository's Gasback has an empty `receive()` function. Neither ordinary receipt path therefore triggers the adversarial refund or Gasback-reentry scenarios. Recipient ordering is not a required mitigation for these implementations.
 

@@ -39,6 +39,9 @@ Key facts that shape the whole flow:
   `address(this)`, so **only the system address `0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE` can
   reconfigure the contract after deployment.** Constructor defaults are what you get otherwise.
 - `FeeVaultSplitter` payees and shares are **immutable** — fixed in its constructor.
+  Alternatively, `MutableFeeVaultSplitter` keeps payees fixed but lets its owner update shares.
+  Its ownership moves from the deployment controller to the DUNE Safe, then to the governance
+  executor. This ownership only controls the splitter's shares.
 - The base fee vault's `RECIPIENT`, `MIN_WITHDRAWAL_AMOUNT` and `WITHDRAWAL_NETWORK` are
   **immutables in the predeploy**, so they are set at genesis or by upgrading the predeploy.
 
@@ -60,7 +63,8 @@ forge install && forge build
 
 ## Part 1 — Contract deployment
 
-Deployer role. Every step is permissionless; nothing here needs chain-operator privileges.
+Deployer role. Contract deployment is permissionless. The mutable splitter ownership handoff
+also requires its current owner and an approved transaction executed by the DUNE Safe.
 
 ### 1. Compute the `Gasback` address
 
@@ -88,6 +92,23 @@ cast create2 --salt 0x0000000000000000000000000000000000000000000000000000000000
 
 Record this as `SPLITTER`. **This is the address the chain operator sets as `RECIPIENT`.**
 
+#### Mutable splitter alternative
+
+For the mutable deployment, replace the `ARGS` and `INIT` above with the following and recompute
+`SPLITTER`. `INITIAL_OWNER` is the nonzero deployment controller that will perform the handoff;
+it is passed explicitly because the CREATE2 factory is not the intended owner. `DUNE_SAFE` is
+the confirmed DUNE Safe address on the target chain. Do not use the reference Safe from the tests.
+Recipients remain fixed; only their shares can change.
+
+```bash
+ARGS=$(cast abi-encode "constructor(address,address[],uint256[])" "$INITIAL_OWNER" "[$GASBACK,$DUNE_SAFE]" "[80,20]")
+INIT=$(forge inspect src/MutableFeeVaultSplitter.sol:MutableFeeVaultSplitter bytecode)${ARGS:2}
+cast create2 --salt 0x0000000000000000000000000000000000000000000000000000000000000000 --init-code "$INIT"
+```
+
+Use this mutable `INIT` in step 3. Record the ordered payees, approved initial shares, initial
+owner and derived address before deployment. See [Mutable fee vault splitter](mutable_fee_vault_splitter.md).
+
 ### 3. Deploy both contracts
 
 ```bash
@@ -112,7 +133,34 @@ Constructor defaults on `Gasback` are:
 | `gasbackMaxBaseFee`     | `type(uint256).max`                          | never becomes a pass-through on high base fees |
 | `baseFeeVault`          | `0x4200000000000000000000000000000000000019` | OP Stack base fee vault predeploy              |
 
-If you want different values, the chain operator must set them (Part 2, step 4).
+If you want different values, the chain operator must set them (Part 2, step 5).
+
+#### Mutable splitter: transfer ownership to the DUNE Safe
+
+Complete this before Part 2 routes fees to the mutable splitter. Every transaction below targets
+`SPLITTER`, sends zero ETH, and uses a normal **CALL**, not a delegatecall.
+
+1. Confirm `owner()` equals `INITIAL_OWNER` and verify the target-chain DUNE Safe address,
+   signers and threshold.
+2. From `INITIAL_OWNER`, execute `transferOwnership(DUNE_SAFE)`. Generate the calldata with:
+   ```bash
+   cast calldata "transferOwnership(address)" "$DUNE_SAFE"
+   ```
+3. Confirm `pendingOwner()` equals `DUNE_SAFE`. The initial owner retains authority until
+   acceptance.
+4. Through the DUNE Safe, approve and execute a transaction calling `acceptOwnership()` on
+   `SPLITTER`. A signer calling directly from their EOA cannot accept for the Safe.
+   ```bash
+   cast calldata "acceptOwnership()"
+   ```
+5. Verify `owner()` equals `DUNE_SAFE` and `pendingOwner()` is the zero address:
+   ```bash
+   cast call "$SPLITTER" "owner()(address)" --rpc-url "$RPC_URL"
+   cast call "$SPLITTER" "pendingOwner()(address)" --rpc-url "$RPC_URL"
+   ```
+
+The DUNE Safe can now update shares until the later governance handoff. Its payment-recipient
+role is separate from ownership; transferring ownership does not change payees or shares.
 
 ### 4. Fund the `Gasback` buffer
 
@@ -151,6 +199,9 @@ forge verify-contract $GASBACK src/Gasback.sol:Gasback --rpc-url $RPC_URL
 
 These steps require control of the chain's genesis config or of the L1 `ProxyAdminOwner`, plus the
 ability to insert a deposit transaction from the system address.
+For the mutable splitter, confirm the DUNE Safe accepted ownership in Part 1 before routing fees.
+The later governance handoff requires DUNE Safe approval and governance execution, independently
+of chain-operator privileges.
 
 ### 1. `RECIPIENT` → the `FeeVaultSplitter`
 
@@ -225,6 +276,35 @@ cast calldata "setBaseFeeVault(address)" 0x4200000000000000000000000000000000000
 
 `withdraw(address,uint256)` on `Gasback` is available the same way if you ever need to recover ETH
 from the buffer.
+
+### 6. Mutable splitter: transfer ownership from the DUNE Safe to governance
+
+Perform this later, once the governance contract and its execution path are deployed and ready.
+Until acceptance completes, the DUNE Safe remains the splitter owner.
+
+1. Confirm the governance executor can call both `acceptOwnership()` and `setShares(uint256[])`
+   on `SPLITTER` through the approved proposal/execution flow. Set `GOVERNANCE_EXECUTOR` to the
+   contract making the final call: the timelock if the Governor uses one, or the governance
+   contract if it executes directly. Verify its nonzero address and bytecode on the target chain.
+2. Through the DUNE Safe, approve and execute a normal CALL to `SPLITTER`, with zero ETH and
+   calldata generated by:
+   ```bash
+   cast calldata "transferOwnership(address)" "$GOVERNANCE_EXECUTOR"
+   ```
+3. Verify `owner()` is still `DUNE_SAFE` and `pendingOwner()` equals `GOVERNANCE_EXECUTOR`.
+4. Through governance, propose, approve, schedule if required, and execute a normal CALL to
+   `SPLITTER` with zero ETH and `acceptOwnership()` calldata:
+   ```bash
+   cast calldata "acceptOwnership()"
+   ```
+   The call must originate from `GOVERNANCE_EXECUTOR`; a voter, proposer or Safe signer cannot
+   accept on its behalf.
+5. Verify `owner()` equals `GOVERNANCE_EXECUTOR` and `pendingOwner()` is the zero address using
+   the read calls from Part 1. Record both handoff transactions. Subsequent `setShares` calls
+   must execute through governance; the DUNE Safe no longer has owner authority.
+
+Ownership transfer preserves fixed payees, current shares and accrued claims. Do not use
+`renounceOwnership()` for either handoff: it permanently disables share updates.
 
 ---
 

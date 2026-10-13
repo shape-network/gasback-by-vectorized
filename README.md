@@ -4,6 +4,8 @@ A barebones implementation of a gasback contract that implements [RIP-7767](http
 
 For automatic ETH splitting with owner-adjustable shares and fixed recipients, see [Mutable fee vault splitter](mutable_fee_vault_splitter.md).
 
+For non-7702 deployment, follow [Part 1 — Contract deployment](shape_deployment.md#part-1--contract-deployment) and [Part 2 — Chain operator setup](shape_deployment.md#part-2--chain-operator-setup). The mutable splitter starts under the deployment controller, transfers ownership to the DUNE Safe in Part 1, then to the governance executor in Part 2 once governance is ready. Both transfers require acceptance by the new owner.
+
 ## Suggested setup for OP stack chains
 
 ### Requirements
