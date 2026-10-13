@@ -14,7 +14,9 @@ The mutable contract adapts that cumulative ETH accounting and the existing push
 
 ## Configuration and ownership
 
-The intended deployment has **two fixed recipients**, with ownership moving from the deployment controller to the **DUNE Safe**, then later to the **governance executor**. The owner is an authorization role, not a third payment recipient. Voting and proposal approval live in the governance system; the splitter only verifies the caller executing an approved update.
+The immutable `FeeVaultSplitter` remains the upstream fee router. It forwards the Gasback/buyback allocation to this mutable splitter and routes the other fees to their configured destinations. DUNE initially decides the Gasback/buyback weights; governance does later.
+
+The intended mutable deployment has **two fixed recipients: Gasback and the buyback recipient**, with ownership moving from the deployment controller to the **DUNE Safe**, then later to the **governance executor**. The owner is an authorization role, not a third payment recipient. Voting and proposal approval live in the governance system; the splitter only verifies the caller executing an approved update.
 
 Deploy with `constructor(address owner_, address[] payees_, uint256[] shares_)`, using two entries in each array. Pass the initial deployment controller explicitly as `owner_`, including when deploying through a CREATE2 factory. Follow [Part 1](shape_deployment.md#part-1--contract-deployment) to transfer ownership to the DUNE Safe and have the Safe accept it before routing fees. Once governance is ready, follow [Part 2](shape_deployment.md#part-2--chain-operator-setup) for the Safe to transfer ownership to the governance executor and governance to accept it. If the Governor executes through a timelock, the timelock must own the splitter because it makes the call. If the governance contract executes proposals directly, that contract is the owner. The owner must be nonzero.
 
@@ -38,7 +40,7 @@ For example, 10 ETH received at 60/40 earns 6 ETH and 4 ETH. After changing to 2
 
 Within each unchanged-share interval, accounting is cumulative, matching PaymentSplitter's rounding behavior. At an update, unallocated rounding dust, less than one wei per recipient in aggregate, rolls into the new shares. Previously earned whole wei remain allocated to their original recipients.
 
-The boundary is receipt by this splitter. ETH still held by the base fee vault when shares change will use the new shares when subsequently withdrawn into the splitter.
+The boundary is receipt by this splitter. ETH still held by the base fee vault or upstream immutable splitter when shares change will use the new shares when subsequently withdrawn into the splitter.
 
 ## Payments and deployment
 
@@ -48,11 +50,11 @@ Keep the recipient list small and trusted. Transaction gas still scales with rec
 
 This version supports ETH only. It does not expose PaymentSplitter's ERC20 release functions or an ERC20 recovery function. Constructor funding is claimable through `release` or `distribute`; it does not trigger automatic distribution.
 
-This is a separate deployment, not an upgrade to an existing immutable splitter. Existing deployment scripts still target `FeeVaultSplitter`; `shape_deployment.md` includes a mutable alternative and both ownership handoffs. To use the mutable version, deploy its bytecode with its three constructor arguments and have the chain operator configure the base fee vault recipient to its address. Old claims remain in the old splitter. CREATE2 addresses must be recalculated with the mutable bytecode and constructor arguments.
+Deploy both splitters: the base fee vault recipient is the immutable `FeeVaultSplitter`, whose Gasback/buyback payee is this `MutableFeeVaultSplitter`. The mutable splitter then forwards that allocation to Gasback and the fixed buyback recipient. Follow `shape_deployment.md` for both CREATE2 deployments and ownership handoffs. Compute the mutable address first, then include it in the immutable splitter constructor. Existing claims remain in the contract where they accrued. The deployment scripts still target the immutable splitter; the guide includes the additional mutable deployment.
 
 ## Intended Shape recipients
 
-The intended recipients are the DUNE Safe and the repository's `Gasback`, deployed on Shape. The Safe receives payments and temporarily owns the splitter until governance accepts ownership. The final recipient addresses must be confirmed and verified before deployment.
+The intended recipients are the repository's `Gasback` and the buyback recipient, deployed on Shape. Confirm the buyback destination explicitly; the DUNE Safe controls weights until governance accepts ownership, independently of whether that Safe is also the buyback recipient. Verify both recipient addresses before deployment. The Safe/Gasback tests below apply when a Safe is used as the buyback recipient.
 
 The reference [Shape Safe proxy](https://shapescan.xyz/address/0x48946D090d9EB0d0ce4f0cdF7758fb8849b09f5A) delegates to [GnosisSafeL2 v1.3.0](https://shapescan.xyz/address/0xfb1bffC9d739B8D520DaF37dF666da4C687191EA#code), according to Shapescan's verified-contract API. Its empty-calldata ETH receipt only emits `SafeReceived`; it does not execute the configured fallback handler, refund ETH, or call Gasback. This repository's Gasback has an empty `receive()` function. Neither ordinary receipt path therefore triggers the adversarial refund or Gasback-reentry scenarios. Recipient ordering is not a required mitigation for these implementations.
 

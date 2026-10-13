@@ -2,29 +2,23 @@
 
 This guide deploys [RIP-7767](https://github.com/ethereum/RIPs/blob/master/RIPS/rip-7767.md) gasback
 on an OP Stack chain **without EIP-7702**. `Gasback` is deployed as an ordinary contract, and the
-base fee vault pays a `FeeVaultSplitter` that forwards a share of base fees to it.
+base fee vault pays an immutable `FeeVaultSplitter` that routes fees to their configured destinations.
+Its Gasback/buyback allocation goes to a `MutableFeeVaultSplitter`, which splits that allocation
+between Gasback and the buyback recipient. DUNE decides these weights first; governance does later.
 
 ## Architecture
 
 ```
-  contract calls gasback ──┐
-                           ▼
-                     ┌───────────┐  pulls when short of ETH   ┌──────────────────┐
-                     │  Gasback  │ ─────────────────────────► │   BaseFeeVault   │
-                     │ (holds a  │                            │ 0x42...0019      │
-                     │ ETH buffer)│                           │ RECIPIENT =      │
-                     └───────────┘                            │  FeeVaultSplitter│
-                           ▲                                  └────────┬─────────┘
-                           │  share of base fees                       │ withdraw()
-                           │                                           ▼
-                           └────────────────────────────── ┌────────────────────┐
-                                                           │  FeeVaultSplitter  │
-                                                           │  (push payments)   │
-                                                           └────────┬───────────┘
-                                                                    │
-                                                                    ▼
-                                                          chain operator treasury,
-                                                          other payees…
+  BaseFeeVault.withdraw()
+    └── FeeVaultSplitter (immutable fee routing)
+          ├── other fee destinations
+          └── MutableFeeVaultSplitter (Gasback/buyback allocation)
+                ├── Gasback
+                └── buyback recipient
+
+  contract calls Gasback ──► Gasback pulls BaseFeeVault when short of ETH
+
+  Mutable weights: DUNE Safe initially, governance executor later.
 
   ┌────────────────┐  slot 0 = Gasback address (written by the system address)
   │ GasbackBeacon  │  read by anyone for discoverability
@@ -39,9 +33,11 @@ Key facts that shape the whole flow:
   `address(this)`, so **only the system address `0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE` can
   reconfigure the contract after deployment.** Constructor defaults are what you get otherwise.
 - `FeeVaultSplitter` payees and shares are **immutable** — fixed in its constructor.
-  Alternatively, `MutableFeeVaultSplitter` keeps payees fixed but lets its owner update shares.
-  Its ownership moves from the deployment controller to the DUNE Safe, then to the governance
-  executor. This ownership only controls the splitter's shares.
+  One of its payees is the downstream `MutableFeeVaultSplitter` for Gasback/buyback.
+- `MutableFeeVaultSplitter` keeps Gasback and the buyback recipient fixed but lets its owner
+  update their relative weights within that allocation. Its ownership moves from the deployment
+  controller to the DUNE Safe, then to the governance executor. This ownership only controls the
+  splitter's shares.
 - The base fee vault's `RECIPIENT`, `MIN_WITHDRAWAL_AMOUNT` and `WITHDRAWAL_NETWORK` are
   **immutables in the predeploy**, so they are set at genesis or by upgrading the predeploy.
 
@@ -75,41 +71,48 @@ cast create2 --salt 0x0000000000000000000000000000000000000000000000000000000000
 Record this as `GASBACK`. It is deterministic for the pinned compiler settings, so you can hand it
 to the chain operator before anything is on-chain.
 
-### 2. Compute the `FeeVaultSplitter` address
+### 2. Compute both splitter addresses
 
-Pick the payee set and shares now — they cannot be changed later. `GASBACK` must be one of them.
-Keep the set **small and trusted**: distribution is push-based, so a payee that burns a lot of gas
-in its `receive()` can make the vault's `withdraw()` run out of gas, and a payee ordered after
-`GASBACK` can re-enter it during distribution (see the note in
-[FeeVaultSplitter.sol](src/FeeVaultSplitter.sol:43)).
+#### Gasback/buyback: `MutableFeeVaultSplitter`
+
+`INITIAL_OWNER` is the nonzero deployment controller that will perform the ownership handoff;
+pass it explicitly because the CREATE2 factory is not the intended owner. Confirm `DUNE_SAFE`
+on the target chain and confirm `BUYBACK_RECIPIENT`, the fixed destination for buyback funds.
+The DUNE Safe's ownership role is separate from the buyback recipient's payment role.
+
+Pick the two fixed payees and DUNE-approved initial relative weights. The following 80/20 weights
+are illustrative; use the approved values before computing the address.
 
 ```bash
-# Example: 80% to gasback, 20% to the operator treasury.
-ARGS=$(cast abi-encode "constructor(address[],uint256[])" "[$GASBACK,$TREASURY]" "[80,20]")
-INIT=$(forge inspect src/FeeVaultSplitter.sol:FeeVaultSplitter bytecode)${ARGS:2}
-cast create2 --salt 0x0000000000000000000000000000000000000000000000000000000000000000 --init-code $INIT
+MUTABLE_ARGS=$(cast abi-encode "constructor(address,address[],uint256[])" "$INITIAL_OWNER" "[$GASBACK,$BUYBACK_RECIPIENT]" "[80,20]")
+MUTABLE_INIT=$(forge inspect src/MutableFeeVaultSplitter.sol:MutableFeeVaultSplitter bytecode)${MUTABLE_ARGS:2}
+cast create2 --salt 0x0000000000000000000000000000000000000000000000000000000000000000 --init-code "$MUTABLE_INIT"
 ```
 
-Record this as `SPLITTER`. **This is the address the chain operator sets as `RECIPIENT`.**
+Record this as `MUTABLE_SPLITTER`. DUNE and later governance can change these Gasback/buyback
+weights without changing the upstream fee allocations. Record ordered payees, initial weights,
+initial owner and derived address. See [Mutable fee vault splitter](mutable_fee_vault_splitter.md).
 
-#### Mutable splitter alternative
+#### Fee routing: immutable `FeeVaultSplitter`
 
-For the mutable deployment, replace the `ARGS` and `INIT` above with the following and recompute
-`SPLITTER`. `INITIAL_OWNER` is the nonzero deployment controller that will perform the handoff;
-it is passed explicitly because the CREATE2 factory is not the intended owner. `DUNE_SAFE` is
-the confirmed DUNE Safe address on the target chain. Do not use the reference Safe from the tests.
-Recipients remain fixed; only their shares can change.
+Keep the immutable splitter as the base fee vault recipient. Configure `MUTABLE_SPLITTER` as
+its payee for the Gasback/buyback allocation, alongside the other required fee destinations.
+Its payees and weights cannot change later. Keep the set small and trusted: the complete nested
+push-payment route must fit within the vault withdrawal's gas budget.
 
 ```bash
-ARGS=$(cast abi-encode "constructor(address,address[],uint256[])" "$INITIAL_OWNER" "[$GASBACK,$DUNE_SAFE]" "[80,20]")
-INIT=$(forge inspect src/MutableFeeVaultSplitter.sol:MutableFeeVaultSplitter bytecode)${ARGS:2}
+# Illustrative routing: 80% to Gasback/buyback, 20% to the operator treasury.
+# Use the complete approved fee destinations and fixed weights for production.
+ARGS=$(cast abi-encode "constructor(address[],uint256[])" "[$MUTABLE_SPLITTER,$TREASURY]" "[80,20]")
+INIT=$(forge inspect src/FeeVaultSplitter.sol:FeeVaultSplitter bytecode)${ARGS:2}
 cast create2 --salt 0x0000000000000000000000000000000000000000000000000000000000000000 --init-code "$INIT"
 ```
 
-Use this mutable `INIT` in step 3. Record the ordered payees, approved initial shares, initial
-owner and derived address before deployment. See [Mutable fee vault splitter](mutable_fee_vault_splitter.md).
+Record this as `SPLITTER`. **This immutable splitter is the base fee vault's `RECIPIENT`.**
+For example, an 80% upstream allocation and 80/20 downstream weights route 64% of total fees
+to Gasback, 16% to buyback and 20% to the treasury.
 
-### 3. Deploy both contracts
+### 3. Deploy Gasback and both splitters
 
 ```bash
 cast send 0x4e59b44847b379578588920cA78FbF26c0B4956C \
@@ -120,6 +123,14 @@ cast send 0x4e59b44847b379578588920cA78FbF26c0B4956C \
 ```bash
 cast send 0x4e59b44847b379578588920cA78FbF26c0B4956C \
   0x0000000000000000000000000000000000000000000000000000000000000000${INIT:2} \
+  --rpc-url $RPC_URL --private-key $PRIVATE_KEY
+```
+
+Deploy the downstream mutable splitter using its own initcode:
+
+```bash
+cast send 0x4e59b44847b379578588920cA78FbF26c0B4956C \
+  0x0000000000000000000000000000000000000000000000000000000000000000${MUTABLE_INIT:2} \
   --rpc-url $RPC_URL --private-key $PRIVATE_KEY
 ```
 
@@ -138,7 +149,7 @@ If you want different values, the chain operator must set them (Part 2, step 5).
 #### Mutable splitter: transfer ownership to the DUNE Safe
 
 Complete this before Part 2 routes fees to the mutable splitter. Every transaction below targets
-`SPLITTER`, sends zero ETH, and uses a normal **CALL**, not a delegatecall.
+`MUTABLE_SPLITTER`, sends zero ETH, and uses a normal **CALL**, not a delegatecall.
 
 1. Confirm `owner()` equals `INITIAL_OWNER` and verify the target-chain DUNE Safe address,
    signers and threshold.
@@ -149,18 +160,21 @@ Complete this before Part 2 routes fees to the mutable splitter. Every transacti
 3. Confirm `pendingOwner()` equals `DUNE_SAFE`. The initial owner retains authority until
    acceptance.
 4. Through the DUNE Safe, approve and execute a transaction calling `acceptOwnership()` on
-   `SPLITTER`. A signer calling directly from their EOA cannot accept for the Safe.
+   `MUTABLE_SPLITTER`. A signer calling directly from their EOA cannot accept for the Safe.
    ```bash
    cast calldata "acceptOwnership()"
    ```
 5. Verify `owner()` equals `DUNE_SAFE` and `pendingOwner()` is the zero address:
    ```bash
-   cast call "$SPLITTER" "owner()(address)" --rpc-url "$RPC_URL"
-   cast call "$SPLITTER" "pendingOwner()(address)" --rpc-url "$RPC_URL"
+   cast call "$MUTABLE_SPLITTER" "owner()(address)" --rpc-url "$RPC_URL"
+   cast call "$MUTABLE_SPLITTER" "pendingOwner()(address)" --rpc-url "$RPC_URL"
    ```
 
-The DUNE Safe can now update shares until the later governance handoff. Its payment-recipient
+The DUNE Safe can now update shares until the later governance handoff. The buyback payment-recipient
 role is separate from ownership; transferring ownership does not change payees or shares.
+For a weight update, the Safe executes a CALL to `MUTABLE_SPLITTER` with zero ETH and calldata
+such as `cast calldata "setShares(uint256[])" "[60,40]"`, using DUNE-approved weights in the
+original order: Gasback, then buyback. After the governance handoff, governance executes that call.
 
 ### 4. Fund the `Gasback` buffer
 
@@ -206,7 +220,8 @@ of chain-operator privileges.
 ### 1. `RECIPIENT` → the `FeeVaultSplitter`
 
 Set the base fee vault's recipient to `SPLITTER` from Part 1, step 2. This is what routes base fees
-into gasback.
+into the immutable fee router, which forwards the Gasback/buyback allocation to
+`MUTABLE_SPLITTER` and distributes the remaining allocations to the other fee destinations.
 
 ### 2. `WITHDRAWAL_NETWORK` → L2 (`1`)
 
@@ -218,7 +233,8 @@ triggers `FeeVaultSplitter.receive()` and distributes to payees.
 
 `Gasback.triggerBaseFeeVaultWithdraw` calls `withdraw()` on the vault, which reverts if the vault
 holds less than `MIN_WITHDRAWAL_AMOUNT`. Set it comfortably below the ETH a single refund needs,
-accounting for the split — `Gasback` only receives its share of each withdrawal. The OP Stack
+accounting for both splits — `Gasback` receives the upstream Gasback/buyback allocation
+multiplied by its current downstream weight. The OP Stack
 default of `10 ether` is far too high; something on the order of `0.00001 ether` is a reasonable
 starting point. Too high and refills stall and gasback degrades to a pass-through.
 
@@ -283,17 +299,17 @@ Perform this later, once the governance contract and its execution path are depl
 Until acceptance completes, the DUNE Safe remains the splitter owner.
 
 1. Confirm the governance executor can call both `acceptOwnership()` and `setShares(uint256[])`
-   on `SPLITTER` through the approved proposal/execution flow. Set `GOVERNANCE_EXECUTOR` to the
+   on `MUTABLE_SPLITTER` through the approved proposal/execution flow. Set `GOVERNANCE_EXECUTOR` to the
    contract making the final call: the timelock if the Governor uses one, or the governance
    contract if it executes directly. Verify its nonzero address and bytecode on the target chain.
-2. Through the DUNE Safe, approve and execute a normal CALL to `SPLITTER`, with zero ETH and
+2. Through the DUNE Safe, approve and execute a normal CALL to `MUTABLE_SPLITTER`, with zero ETH and
    calldata generated by:
    ```bash
    cast calldata "transferOwnership(address)" "$GOVERNANCE_EXECUTOR"
    ```
 3. Verify `owner()` is still `DUNE_SAFE` and `pendingOwner()` equals `GOVERNANCE_EXECUTOR`.
 4. Through governance, propose, approve, schedule if required, and execute a normal CALL to
-   `SPLITTER` with zero ETH and `acceptOwnership()` calldata:
+   `MUTABLE_SPLITTER` with zero ETH and `acceptOwnership()` calldata:
    ```bash
    cast calldata "acceptOwnership()"
    ```
@@ -324,12 +340,24 @@ cast call 0x4200000000000000000000000000000000000019 "recipient()(address)"     
 cast call 0x4200000000000000000000000000000000000019 "minWithdrawalAmount()(uint256)"  --rpc-url $RPC_URL
 cast call 0x4200000000000000000000000000000000000019 "withdrawalNetwork()(uint8)"      --rpc-url $RPC_URL  # must be 1
 
-# Gasback is a payee of the splitter
-cast call $SPLITTER "shares(address)(uint256)" $GASBACK --rpc-url $RPC_URL
+# Immutable fee router forwards the Gasback/buyback allocation to the mutable splitter
+cast call "$SPLITTER" "shares(address)(uint256)" "$MUTABLE_SPLITTER" --rpc-url "$RPC_URL"
+
+# Mutable splitter forwards to the two fixed recipients
+cast call "$MUTABLE_SPLITTER" "payee(uint256)(address)" 0 --rpc-url "$RPC_URL" # GASBACK
+cast call "$MUTABLE_SPLITTER" "payee(uint256)(address)" 1 --rpc-url "$RPC_URL" # BUYBACK_RECIPIENT
+cast call "$MUTABLE_SPLITTER" "shares(address)(uint256)" "$GASBACK" --rpc-url "$RPC_URL"
+cast call "$MUTABLE_SPLITTER" "shares(address)(uint256)" "$BUYBACK_RECIPIENT" --rpc-url "$RPC_URL"
+cast call "$MUTABLE_SPLITTER" "owner()(address)" --rpc-url "$RPC_URL"
+cast call "$MUTABLE_SPLITTER" "pendingOwner()(address)" --rpc-url "$RPC_URL"
 
 # Buffer is funded
 cast balance $GASBACK --rpc-url $RPC_URL
 ```
+
+Before launch, rehearse a vault withdrawal through **both** splitters and verify all fee
+destinations receive their configured allocations. After DUNE or governance changes the mutable
+weights, repeat and confirm only the Gasback/buyback allocation changes internally.
 
 End-to-end smoke test — call `Gasback` with a 32-byte `gasToBurn` and check the refund:
 
@@ -347,7 +375,9 @@ zero return means `Gasback` was out of ETH or the base fee exceeded `gasbackMaxB
 - **`tx.gasprice` must be non-zero.** The fallback rejects zero-gasprice calls to block
   L1→L2 deposits from farming gasback.
 - **Calldata must be exactly 32 bytes.** Anything else reverts.
-- **The splitter set is permanent.** Getting payees or shares wrong means deploying a new splitter
-  _and_ re-pointing `RECIPIENT`, which is a predeploy upgrade.
+- **Fixed routing and recipients.** The upstream immutable splitter fixes all fee destinations
+  and their allocations, including the mutable splitter address. The downstream mutable splitter
+  fixes its two recipients; DUNE and later governance can update only their weights. Replacing
+  either splitter requires updating the upstream route, potentially including a vault upgrade.
 - **If a distribution ever fails**, funds are not lost: anyone can call
   `distribute(uint256 start, uint256 end)` to release payees in bounded chunks.

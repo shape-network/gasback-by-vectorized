@@ -2,7 +2,7 @@
 
 A barebones implementation of a gasback contract that implements [RIP-7767](https://github.com/ethereum/RIPs/blob/master/RIPS/rip-7767.md).
 
-For automatic ETH splitting with owner-adjustable shares and fixed recipients, see [Mutable fee vault splitter](mutable_fee_vault_splitter.md).
+The immutable `FeeVaultSplitter` routes fees to their configured destinations. Its Gasback/buyback allocation goes to the [Mutable fee vault splitter](mutable_fee_vault_splitter.md), where DUNE initially decides the weights between Gasback and buyback, then governance takes over.
 
 For non-7702 deployment, follow [Part 1 — Contract deployment](shape_deployment.md#part-1--contract-deployment) and [Part 2 — Chain operator setup](shape_deployment.md#part-2--chain-operator-setup). The mutable splitter starts under the deployment controller, transfers ownership to the DUNE Safe in Part 1, then to the governance executor in Part 2 once governance is ready. Both transfers require acceptance by the new owner.
 
