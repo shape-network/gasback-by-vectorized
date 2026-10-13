@@ -10,6 +10,7 @@ auto_detect_solc = false
 optimizer = true
 optimizer_runs = 1000
 via_ir = true
+fs_permissions = [{ access = "read", path = "./test/fixtures" }]
 gas_limit = 1_000_000_000 # ETH is 30M, but we use a higher value.
 always_use_create_2_factory = true
 remappings = [
